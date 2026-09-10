@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CRM data API</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1rem; }
+  code { background: #f4f4f5; padding: .1rem .3rem; border-radius: 3px; }
+  li { margin: .2rem 0; }
+  .note { color: #666; }
+</style>
+
+<h1>CRM data API</h1>
+<p class="note">
+  Placeholder page — replace this file with the dashboard. Static assets in
+  <code>dashboard/</code> are served from the same origin as
+  <code>/api/*</code>, so <code>fetch('/api/...')</code> works with no CORS setup.
+</p>
+
+<h2>Live check</h2>
+<pre id="out">loading…</pre>
+
+<h2>Endpoints</h2>
+<ul id="eps"></ul>
+
+<p class="note">
+  Static JSON alternative (no server): <code>./data/*.json</code>, regenerated
+  by <code>scripts/export_json.py</code>.
+</p>
+
+<script>
+  // Doubles as the connectivity check: if this renders, the API is wired up.
+  fetch('/api/meta')
+    .then(r => r.json())
+    .then(m => {
+      document.getElementById('out').textContent =
+        `currency: ${m.currency}\nmoney field: ${m.amount_field}\n` +
+        `fiscal year: ${m.fiscal_year}\n` +
+        `deals: ${m.row_counts.v_deals}   leads: ${m.row_counts.v_leads}\n` +
+        `snapshot days captured: ${m.snapshot_history.days}\n\n` +
+        `caveats:\n` + m.caveats.map(c => ' - ' + c).join('\n');
+    })
+    .catch(e => {
+      document.getElementById('out').textContent =
+        'API unreachable — start it with: python3 scripts/serve.py\n\n' + e;
+    });
+
+  fetch('/api')
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('eps').innerHTML = d.endpoints
+        .map(e => `<li><code>${e}</code></li>`).join('');
+    })
+    .catch(() => {});
+</script>

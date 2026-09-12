@@ -249,12 +249,31 @@ distribution, account and industry mix.
 
 ## Scheduling
 
-`data/crm.db` is only as fresh as the last run. To refresh daily at 2am:
+`data/crm.db` is only as fresh as the last run, so the refresh has to be
+scheduled rather than remembered.
+
+**Windows** — `scripts/daily.ps1`, registered with Task Scheduler. Run once in
+an elevated PowerShell:
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "powershell.exe" `
+           -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\path\to\crm\scripts\daily.ps1"
+$trigger = New-ScheduledTaskTrigger -Daily -At 2am
+$set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun
+Register-ScheduledTask -TaskName "CRM daily refresh" -Action $action `
+           -Trigger $trigger -Settings $set
+```
+
+`-StartWhenAvailable` matters: it runs a missed job once the machine is back,
+rather than silently skipping that day's snapshot.
+
+**macOS** — use `launchd`, not cron. Cron does not catch up after sleep, so a
+laptop asleep at 2am loses that day permanently; launchd runs the job on wake.
+
+**Linux / server** — `scripts/daily.sh` via cron:
 
 ```bash
-crontab -e
-# then add:
-0 2 * * * /Users/mananbhimani/Documents/GitHub/crm/scripts/daily.sh
+0 2 * * * /path/to/crm/scripts/daily.sh
 ```
 
 **The snapshot job is the one thing that must not be skipped.** Zoho keeps
@@ -316,11 +335,18 @@ OAuth client is **CRM External Analytics** (Server-based Application,
 `api-console.zoho.in`), read-only scopes:
 
 ```
-ZohoCRM.modules.ALL  ZohoCRM.settings.ALL  ZohoCRM.bulk.ALL
-ZohoCRM.coql.READ    ZohoCRM.users.READ
+ZohoCRM.modules.ALL.READ        ZohoCRM.settings.modules.READ
+ZohoCRM.settings.fields.READ    ZohoCRM.users.READ
+ZohoCRM.coql.READ
 ```
 
-Read-only by design — this pipeline cannot write to the CRM.
+**These grant read and nothing else.** The `.READ` suffix is the operation,
+so `modules.ALL.READ` means read on every module. Dropping it —
+`ZohoCRM.modules.ALL` — would silently grant create, update and delete as
+well. If you ever regenerate this token, keep the suffix.
+
+Writing to the CRM is therefore impossible through this credential, not
+merely discouraged. Zoho rejects the call at the API boundary.
 
 `.env` holds a **non-expiring refresh token**. Treat it like a password. It is
 gitignored and mode 600; don't move it into a shared drive or commit it.

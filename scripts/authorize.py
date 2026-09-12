@@ -19,12 +19,16 @@ import webbrowser
 
 REDIRECT_URI = "http://localhost:8000/callback"
 PORT = 8000
+# Read-only by construction. The ".READ" suffix is the operation, so
+# "modules.ALL.READ" means read on every module - whereas "modules.ALL"
+# would grant create, update and delete as well. Nothing here can write to
+# the CRM even if a caller tried.
 SCOPES = ",".join([
-    "ZohoCRM.modules.ALL",
-    "ZohoCRM.settings.ALL",
-    "ZohoCRM.bulk.ALL",
-    "ZohoCRM.coql.READ",
-    "ZohoCRM.users.READ",
+    "ZohoCRM.modules.ALL.READ",      # records in every module
+    "ZohoCRM.settings.modules.READ",  # module list
+    "ZohoCRM.settings.fields.READ",   # field metadata
+    "ZohoCRM.users.READ",             # owner id -> name
+    "ZohoCRM.coql.READ",              # ad-hoc queries
 ])
 
 # Zoho hands back an `accounts-server` param on the redirect, so the data

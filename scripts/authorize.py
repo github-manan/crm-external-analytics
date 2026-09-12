@@ -19,12 +19,15 @@ import webbrowser
 
 REDIRECT_URI = "http://localhost:8000/callback"
 PORT = 8000
-# Read-only by construction. The ".READ" suffix is the operation, so
-# "modules.ALL.READ" means read on every module - whereas "modules.ALL"
-# would grant create, update and delete as well. Nothing here can write to
-# the CRM even if a caller tried.
+# Read-only by construction. The ".READ" suffix is the operation. For the
+# modules scope specifically, Zoho's all-modules wildcard is just
+# "ZohoCRM.modules.READ" - "ZohoCRM.modules.ALL.READ" is not valid syntax
+# ("ALL" is only used when naming one specific module, e.g.
+# "ZohoCRM.modules.leads.ALL"); Zoho rejects the whole scope string with
+# "Invalid OAuth Scope" if it's included. Nothing here can write to the CRM
+# even if a caller tried.
 SCOPES = ",".join([
-    "ZohoCRM.modules.ALL.READ",      # records in every module
+    "ZohoCRM.modules.READ",           # records in every module
     "ZohoCRM.settings.modules.READ",  # module list
     "ZohoCRM.settings.fields.READ",   # field metadata
     "ZohoCRM.users.READ",             # owner id -> name

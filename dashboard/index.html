@@ -1,53 +1,132 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
-<title>CRM data API</title>
-<style>
-  body { font: 14px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1rem; }
-  code { background: #f4f4f5; padding: .1rem .3rem; border-radius: 3px; }
-  li { margin: .2rem 0; }
-  .note { color: #666; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MitKat Sales Analytics</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-<h1>CRM data API</h1>
-<p class="note">
-  Placeholder page — replace this file with the dashboard. Static assets in
-  <code>dashboard/</code> are served from the same origin as
-  <code>/api/*</code>, so <code>fetch('/api/...')</code> works with no CORS setup.
-</p>
+<header class="topbar">
+  <div class="topbar-title">
+    <h1>MitKat Sales Analytics</h1>
+    <p class="subtitle">Read-only view over Zoho CRM &middot; Consulting &middot; Datasurfr &middot; MSS &middot; Renewal</p>
+  </div>
+  <div class="topbar-meta">
+    <span id="sync-status" class="pill pill-muted">connecting&hellip;</span>
+    <button id="notes-toggle" class="pill pill-warn" type="button">Data notes</button>
+  </div>
+</header>
 
-<h2>Live check</h2>
-<pre id="out">loading…</pre>
+<div id="notes-panel" class="notes-panel" hidden>
+  <div class="notes-panel-head">
+    <strong>Read this before trusting a number here</strong>
+    <button id="notes-close" type="button" aria-label="Close">&times;</button>
+  </div>
+  <ul id="notes-list"></ul>
+</div>
 
-<h2>Endpoints</h2>
-<ul id="eps"></ul>
+<main id="app">
 
-<p class="note">
-  Static JSON alternative (no server): <code>./data/*.json</code>, regenerated
-  by <code>scripts/export_json.py</code>.
-</p>
+  <section class="kpi-row" id="kpi-row" aria-label="Key metrics">
+    <div class="kpi-card skeleton"><span class="kpi-label">All-time won revenue</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Current FY revenue</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Open pipeline value</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Open deals</span><span class="kpi-value">&mdash;</span></div>
+  </section>
 
-<script>
-  // Doubles as the connectivity check: if this renders, the API is wired up.
-  fetch('/api/meta')
-    .then(r => r.json())
-    .then(m => {
-      document.getElementById('out').textContent =
-        `currency: ${m.currency}\nmoney field: ${m.amount_field}\n` +
-        `fiscal year: ${m.fiscal_year}\n` +
-        `deals: ${m.row_counts.v_deals}   leads: ${m.row_counts.v_leads}\n` +
-        `snapshot days captured: ${m.snapshot_history.days}\n\n` +
-        `caveats:\n` + m.caveats.map(c => ' - ' + c).join('\n');
-    })
-    .catch(e => {
-      document.getElementById('out').textContent =
-        'API unreachable — start it with: python3 scripts/serve.py\n\n' + e;
-    });
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Bookings by fiscal year</h2>
+        <span class="card-note">April&ndash;March &middot; won deals only</span>
+      </div>
+      <canvas id="chart-fiscal" height="220"></canvas>
+    </div>
 
-  fetch('/api')
-    .then(r => r.json())
-    .then(d => {
-      document.getElementById('eps').innerHTML = d.endpoints
-        .map(e => `<li><code>${e}</code></li>`).join('');
-    })
-    .catch(() => {});
-</script>
+    <div class="card">
+      <div class="card-head">
+        <h2>Pipeline mix</h2>
+        <span class="card-note">Won vs. open value, all-time</span>
+      </div>
+      <canvas id="chart-pipelines" height="220"></canvas>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Monthly bookings trend</h2>
+      <div class="card-controls">
+        <label for="pipeline-filter">Pipeline</label>
+        <select id="pipeline-filter"><option value="">All pipelines</option></select>
+      </div>
+    </div>
+    <p class="card-note">April and March alone make up a large share of all-time bookings &mdash; expect big swings at fiscal year boundaries, not a data error.</p>
+    <canvas id="chart-monthly" height="110"></canvas>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Open pipeline by stage</h2>
+      <div class="card-controls">
+        <label for="stage-pipeline-filter">Pipeline</label>
+        <select id="stage-pipeline-filter"></select>
+      </div>
+    </div>
+    <p class="card-note">Each pipeline has its own stage set &mdash; funnels are never blended across pipelines.</p>
+    <canvas id="chart-stages" height="220"></canvas>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Seasonality</h2>
+        <span class="card-note">Won revenue by calendar month, all years combined</span>
+      </div>
+      <canvas id="chart-seasonality" height="220"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Open pipeline over time</h2>
+        <span class="card-note">From daily snapshots &mdash; history starts the day this dashboard went live</span>
+      </div>
+      <canvas id="chart-history" height="220"></canvas>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Rep performance</h2>
+      <div class="card-controls">
+        <label for="fy-filter">Fiscal year</label>
+        <select id="fy-filter"><option value="">All years</option></select>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="reps-table">
+        <thead>
+          <tr>
+            <th>Rep</th>
+            <th class="num">Deals won</th>
+            <th class="num">Revenue</th>
+            <th class="num">Open deals</th>
+            <th class="num">Open pipeline</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="5" class="loading-row">loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  Data via the local read-only API on <code>localhost:8420</code> &middot; never writes to Zoho.
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

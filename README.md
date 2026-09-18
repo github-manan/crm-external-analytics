@@ -259,13 +259,20 @@ an elevated PowerShell:
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
            -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\path\to\crm\scripts\daily.ps1"
 $trigger = New-ScheduledTaskTrigger -Daily -At 2am
-$set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun
+$set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
+           -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName "CRM daily refresh" -Action $action `
            -Trigger $trigger -Settings $set
 ```
 
 `-StartWhenAvailable` matters: it runs a missed job once the machine is back,
-rather than silently skipping that day's snapshot.
+rather than silently skipping that day's snapshot. On a laptop,
+`-AllowStartIfOnBatteries` and `-DontStopIfGoingOnBatteries` matter just as
+much - Windows defaults a scheduled task to refuse to run (or to kill it
+mid-run) on battery power, which quietly defeats `-StartWhenAvailable` on any
+day the laptop isn't plugged in at the right moment. Without these flags,
+snapshot history gets permanent, silent holes - which is exactly what
+happened during initial setup before this was caught.
 
 **macOS** — use `launchd`, not cron. Cron does not catch up after sleep, so a
 laptop asleep at 2am loses that day permanently; launchd runs the job on wake.

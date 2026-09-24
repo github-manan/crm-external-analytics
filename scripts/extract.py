@@ -37,6 +37,13 @@ MODULES = [
 # Zoho rejects a delete poll on these; field trackers have no recycle bin.
 NO_DELETE_POLL = {"DealHistory"}
 
+# Extra query params per module. Zoho hides converted leads from the default
+# list view, so without converted=both the extract silently misses every lead
+# that ever became a contact - which is most of the interesting ones.
+MODULE_PARAMS = {
+    "Leads": {"converted": "both"},
+}
+
 PER_PAGE = 200
 FIELD_LIMIT = 50  # Zoho caps the `fields` param
 
@@ -85,7 +92,7 @@ def field_list(module):
 
 def fetch_pages(module, modified_since=None):
     """Yield pages of records, following Zoho's page_token pagination."""
-    params = {"per_page": PER_PAGE}
+    params = {"per_page": PER_PAGE, **MODULE_PARAMS.get(module, {})}
     headers = {}
     if modified_since:
         headers["If-Modified-Since"] = modified_since

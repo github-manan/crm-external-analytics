@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly Sales Review</title>
+<link rel="stylesheet" href="weekly.css">
+
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Weekly Sales Review</h1>
+      <div class="subtitle" id="subtitle">Loading…</div>
+    </div>
+    <div class="filters">
+      <div class="field">
+        <label for="owner">Rep</label>
+        <select id="owner"><option value="All">All reps</option></select>
+      </div>
+      <div class="field">
+        <label for="week">Week</label>
+        <select id="week"></select>
+      </div>
+    </div>
+  </header>
+
+  <!-- KPI row -->
+  <div class="grid grid-4">
+    <div class="card tile"><div class="label">Leads this week</div>
+      <div class="value" id="kpi-leads">—</div><div class="sub" id="kpi-leads-sub"></div></div>
+    <div class="card tile"><div class="label">Revenue this week</div>
+      <div class="value" id="kpi-revenue">—</div><div class="sub" id="kpi-revenue-sub"></div></div>
+    <div class="card tile"><div class="label">Deals in pipeline</div>
+      <div class="value" id="kpi-pipeline">—</div><div class="sub" id="kpi-pipeline-sub"></div></div>
+    <div class="card tile"><div class="label">Accounts this week</div>
+      <div class="value" id="kpi-accounts">—</div><div class="sub" id="kpi-accounts-sub"></div></div>
+  </div>
+
+  <!-- Target + movement summary -->
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Revenue target</h2>
+      <p class="hint" id="target-month"></p>
+      <div class="target-head">
+        <div class="target-actual" id="target-actual">—</div>
+        <div class="target-of" id="target-of"></div>
+      </div>
+      <div class="track"><div class="fill" id="target-fill" style="width:0"></div></div>
+      <div class="target-foot">
+        <span id="target-pct"></span>
+        <span id="target-gap"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Deal movement this week</h2>
+      <p class="hint">Stage changes recorded between Monday and Sunday.</p>
+      <div class="move-summary" id="move-summary"></div>
+    </div>
+  </div>
+
+  <!-- Lead journey -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Lead journey</h2>
+    <p class="hint" id="journey-hint">Lead → Contacted → Converted → Action → Won. Percentages are conversion from the previous step.</p>
+    <div class="funnel" id="funnel"></div>
+  </div>
+
+  <!-- Sources + movement detail -->
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>Leads by source</h2>
+      <p class="hint" id="sources-hint"></p>
+      <div class="bars" id="sources"></div>
+    </div>
+
+    <div class="card">
+      <h2>What moved</h2>
+      <p class="hint">Every stage change this week, newest first.</p>
+      <div class="move-list" id="move-list"></div>
+    </div>
+  </div>
+
+  <!-- Attention -->
+  <div class="card">
+    <h2>Needs attention</h2>
+    <p class="hint">The action list for this call.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="stuck" aria-selected="true">Stuck deals</button>
+      <button class="tab" role="tab" data-tab="slipped" aria-selected="false">Slipped close dates</button>
+      <button class="tab" role="tab" data-tab="closing" aria-selected="false">Closing in 30 days</button>
+    </div>
+    <div class="scroll" id="attention"></div>
+  </div>
+
+  <footer>
+    <span>Data via the local read-only API on <code>localhost:8420</code> · never writes to Zoho.</span>
+    <span id="freshness"></span>
+  </footer>
+
+</div>
+<script src="weekly.js"></script>
+</body>
+</html>

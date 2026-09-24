@@ -43,6 +43,50 @@ python3 scripts/export_json.py  # aggregates -> dashboard/data/*.json
 
 The dashboard is hand-built — no BI platform. Two ways to get at the data.
 
+### Two dashboards, deliberately separate
+
+| Page | Owner | Purpose |
+|---|---|---|
+| `dashboard/index.html` + `app.js` + `style.css` | Ankit | Overall sales dashboard - bookings, funnel, seasonality, reps |
+| `dashboard/weekly.html` + `weekly.js` + `weekly.css` | Manan | Weekly review deck for the sales call with the heads and CEO |
+
+They share the API and nothing else - separate files, separate endpoints
+(`/api/weekly/*` vs the rest). Edit one without touching the other.
+
+Open them at `http://localhost:8420/index.html` and
+`http://localhost:8420/weekly.html`.
+
+**The weekly dashboard adds:**
+
+| Endpoint | Returns |
+|---|---|
+| `/api/weekly/options` | owner list, selectable weeks, current week |
+| `/api/weekly/summary` | KPI tiles, movement summary, target vs actual |
+| `/api/weekly/journey` | Lead -> Contacted -> Converted -> Action -> Won |
+| `/api/weekly/sources` | leads by source for the week |
+| `/api/weekly/movement` | every stage change that week, from -> to |
+| `/api/weekly/attention` | stuck deals, slipped close dates, closing in 30 days |
+
+All take `?week=YYYY-MM-DD` (any date in the week) and `?owner=<name>`.
+
+**Revenue targets live in `config/targets.json`**, not the CRM - Zoho holds no
+quota data on this plan. Edit that file; it is read live, no restart needed.
+The numbers currently in it are placeholders.
+
+**Lead journey definitions** (settled with the sales team):
+
+- *Lead* - a lead owned by the rep
+- *Lead Contacted* - status Contacted / Attempted to Contact, **or** already converted
+- *Lead Converted* - converted to a contact via Zoho's convert action
+- *Lead Action* - that contact has a deal, at any stage
+- *Deal Won* - that deal reached Closed Won
+
+Two things to know. The funnel is **cumulative**: 1,397 converted leads never
+had their status set to Contacted, so counting status strictly makes the funnel
+widen at step two. And *Lead Action* joins lead -> converted contact -> deal,
+not via `Converted_Deal` - that field is only set when a deal is created during
+conversion, which happened for just 51 leads.
+
 ### Option A: the JSON API (preferred)
 
 ```bash
@@ -149,7 +193,15 @@ funnel across Consulting and Datasurfr means nothing.
 
 Use `stage_order` to sort funnel charts; alphabetical order is wrong.
 
-### 5. 336 deals have no `closing_date`
+### 5. Converted leads are hidden from Zoho's default list view
+
+`GET /Leads` returns only **unconverted** leads. Without `converted=both` the
+extract silently misses every lead that ever became a contact - 1,503 of
+10,347 here, and precisely the ones the conversion funnel needs. The extractor
+passes it (see `MODULE_PARAMS`); anyone writing a fresh Zoho query must
+remember to.
+
+### 6. 336 deals have no `closing_date`
 
 That's 16% of the book, and since every time-based view keys off
 `closing_date`, those deals **silently drop out** of any trend chart. Mostly
@@ -175,7 +227,7 @@ If a stakeholder asks why the dashboard total differs from Zoho's, this is
 usually why. Fixing it means someone entering the missing closing dates in the
 CRM.
 
-### 6. `Lost_Reason` does not contain loss reasons
+### 7. `Lost_Reason` does not contain loss reasons
 
 Its only values are `Monthly`, `Quartely`, `Half-Yearly` — billing frequency,
 entered in the wrong field. Exposed as `lost_reason_misused` so nobody builds

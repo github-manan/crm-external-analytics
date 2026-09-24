@@ -19,7 +19,11 @@ import os
 import re
 import sqlite3
 import sys
+import sys
 import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import weekly
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
@@ -184,7 +188,59 @@ def ep_query(query):
         return {"error": str(error)}, 400
 
 
+# --- Weekly dashboard -------------------------------------------------------
+
+def _wk(query):
+    return query.get("week", [None])[0], query.get("owner", [None])[0]
+
+
+def ep_weekly_summary(query):
+    week, owner = _wk(query)
+    return {
+        "owner": owner or "All",
+        "kpis": weekly.kpis(week, owner),
+        "movement": weekly.movement_summary(week, owner),
+        "target": weekly.target(week, owner),
+    }
+
+
+def ep_weekly_journey(query):
+    week, owner = _wk(query)
+    return weekly.journey(week, owner, query.get("scope", ["all"])[0])
+
+
+def ep_weekly_sources(query):
+    week, owner = _wk(query)
+    return {"rows": weekly.lead_sources(week, owner, query.get("scope", ["week"])[0])}
+
+
+def ep_weekly_movement(query):
+    week, owner = _wk(query)
+    return {"summary": weekly.movement_summary(week, owner),
+            "rows": weekly.movement(week, owner)}
+
+
+def ep_weekly_attention(query):
+    week, owner = _wk(query)
+    return {
+        "stuck": weekly.stuck_deals(owner),
+        "slipped": weekly.slipped_deals(week, owner),
+        "closing_soon": weekly.closing_soon(owner),
+    }
+
+
+def ep_weekly_options(_):
+    return {"owners": weekly.owners(), "weeks": weekly.weeks_available(),
+            "current_week": weekly.week_bounds()[0]}
+
+
 ROUTES = {
+    "/api/weekly/summary": ep_weekly_summary,
+    "/api/weekly/journey": ep_weekly_journey,
+    "/api/weekly/sources": ep_weekly_sources,
+    "/api/weekly/movement": ep_weekly_movement,
+    "/api/weekly/attention": ep_weekly_attention,
+    "/api/weekly/options": ep_weekly_options,
     "/api/meta": ep_meta,
     "/api/views": ep_views,
     "/api/bookings/fiscal": ep_bookings_fiscal,

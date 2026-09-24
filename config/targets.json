@@ -1,0 +1,18 @@
+{
+  "_comment": "Revenue targets in rupees. Zoho holds no quota data, so targets live here. Edit each quarter. '_default' applies to any owner without an explicit entry; omit an owner to fall back to it. Company target is the number shown when no owner filter is applied.",
+  "company_monthly_inr": {
+    "_default": 40000000,
+    "2026-09": 40000000,
+    "2026-10": 40000000
+  },
+  "owner_monthly_inr": {
+    "_default": 3000000,
+    "Inder Chaudhry": 5000000,
+    "Saishh Kadam": 5000000,
+    "Harshita Salian": 3000000,
+    "Harshita Suryawanshi": 3000000,
+    "Mrunal Patil": 3000000,
+    "Namrata Dhuri": 3000000,
+    "Ashok Agarwal": 3000000
+  }
+}

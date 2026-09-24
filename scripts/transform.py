@@ -80,6 +80,7 @@ SELECT
     json_extract(payload, '$.Account_Name.name')                AS account_name,
     json_extract(payload, '$.Account_Name.id')                  AS account_id,
     json_extract(payload, '$.Contact_Name.name')                AS contact_name,
+    json_extract(payload, '$.Contact_Name.id')                  AS contact_id,
     json_extract(payload, '$.Currency')                         AS currency,
     json_extract(payload, '$.Amount')                           AS amount_original,
     json_extract(payload, '$.Exchange_Rate')                    AS exchange_rate,

@@ -85,7 +85,7 @@ function setKPI(index, value, sub) {
   }
 }
 
-async function loadKPIs(pipelines, fiscal) {
+async function loadKPIs(pipelines, fiscal, meta) {
   const wonTotal = pipelines.reduce((s, p) => s + p.won_inr, 0);
   const openTotal = pipelines.reduce((s, p) => s + p.open_inr, 0);
   const openDeals = pipelines.reduce((s, p) => s + p.open_deals, 0);
@@ -95,6 +95,16 @@ async function loadKPIs(pipelines, fiscal) {
   setKPI(1, fmtCr(currentFY.revenue_inr), `${currentFY.fiscal_year} · ${fmtInt(currentFY.deals_won)} deals so far`);
   setKPI(2, fmtCr(openTotal), 'across all 4 pipelines');
   setKPI(3, fmtInt(openDeals), 'currently open');
+  setKPI(4, fmtInt(meta.row_counts.v_leads), 'all-time, all statuses');
+
+  try {
+    const journey = await getJSON('/api/weekly/journey?scope=all');
+    const lead = journey.steps[0].count, action = journey.steps[3].count;
+    const actionPct = lead ? (action / lead * 100).toFixed(1) : '0.0';
+    setKPI(5, `${actionPct}%`, `${fmtInt(action)} of ${fmtInt(lead)} leads reached a deal · ${journey.overall_pct}% won`);
+  } catch (e) {
+    setKPI(5, 'n/a', 'weekly dashboard API unavailable');
+  }
 }
 
 // ---------- bookings by fiscal year ----------
@@ -371,7 +381,7 @@ async function main() {
       getJSON('/api/pipeline/history'),
     ]);
 
-  loadKPIs(pipelineRows, fiscalRows);
+  loadKPIs(pipelineRows, fiscalRows, meta);
   renderFiscalChart(fiscalRows);
   renderPipelinesChart(pipelineRows);
   renderSeasonalityChart(seasonalityRows);

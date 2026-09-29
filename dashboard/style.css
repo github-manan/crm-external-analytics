@@ -49,9 +49,25 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.dash-nav { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+.dash-nav a {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.dash-nav a.current {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+  font-weight: 600;
+}
+
 .topbar h1 { margin: 0; font-size: 1.25rem; }
 .subtitle { margin: 0.15rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
-.topbar-meta { display: flex; gap: 0.5rem; align-items: center; }
+.topbar-meta { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
 .pill {
   border: none;
@@ -84,7 +100,7 @@ body {
 
 main { max-width: 1200px; margin: 1.25rem auto; padding: 0 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
 
-.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
 .kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);

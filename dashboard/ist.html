@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IST Dashboard</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="ist.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-title">
+    <nav class="dash-nav">
+      <a href="index.html">Overall</a>
+      <a href="weekly.html">Weekly Review</a>
+      <a href="ist.html" class="current">IST Dashboard</a>
+    </nav>
+    <h1>IST Dashboard</h1>
+    <p class="subtitle">Replicates the native Zoho CRM Analytics dashboard &middot; rebuilt on our own read-only API</p>
+  </div>
+  <div class="topbar-meta">
+    <label for="owner" class="card-note" style="margin-right:4px;">Owner</label>
+    <select id="owner"><option value="">All Users</option></select>
+    <span id="sync-status" class="pill pill-muted">connecting&hellip;</span>
+    <button id="notes-toggle" class="pill pill-warn" type="button">About this page</button>
+  </div>
+</header>
+
+<div id="notes-panel" class="notes-panel" hidden>
+  <div class="notes-panel-head">
+    <strong>What's replicated vs. redefined</strong>
+    <button id="notes-close" type="button" aria-label="Close">&times;</button>
+  </div>
+  <ul id="notes-list">
+    <li>KPI tiles compare to the <b>previous week</b> here, not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
+    <li><b>Deal Movement</b> is split by pipeline here (Consulting/Datasurfr/MSS/Renewal each have different stages) &mdash; the source dashboard blends all four into one axis, which the README explicitly warns against.</li>
+    <li>Lead Journey, Revenue Target and Leads by Source reuse the exact same definitions as the Weekly Review dashboard &mdash; one definition per metric, not a second copy.</li>
+    <li>Zoho's own "Last 3 Months" table is actually 3 weeks by its date ranges &mdash; ours is honestly labeled as weeks.</li>
+  </ul>
+</div>
+
+<main id="app">
+
+  <section class="kpi-row" id="kpi-row" aria-label="Key metrics">
+    <div class="kpi-card skeleton"><span class="kpi-label">Leads this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Revenue this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Deals in pipeline</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Accounts this week</span><span class="kpi-value">&mdash;</span></div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Leads by Source</h2>
+        <div class="card-controls">
+          <label for="source-scope">Scope</label>
+          <select id="source-scope">
+            <option value="all">All-time</option>
+            <option value="week">This week</option>
+          </select>
+        </div>
+      </div>
+      <canvas id="chart-sources" height="200"></canvas>
+      <div class="source-list" id="source-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Lead Journey</h2>
+        <span class="card-note" id="journey-note">Lead &rarr; Contacted &rarr; Converted &rarr; Action &rarr; Won</span>
+      </div>
+      <div class="funnel" id="funnel"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Revenue Target &mdash; This Month</h2>
+      <span class="card-note" id="target-month"></span>
+    </div>
+    <div class="target-head">
+      <div class="target-actual" id="target-actual">&mdash;</div>
+      <div class="target-of" id="target-of"></div>
+    </div>
+    <div class="target-track"><div class="target-fill" id="target-fill" style="width:0"></div></div>
+    <div class="target-foot"><span id="target-pct"></span><span id="target-gap"></span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Deal Movement</h2>
+      <div class="card-controls">
+        <label for="stage-pipeline">Pipeline</label>
+        <select id="stage-pipeline"></select>
+      </div>
+    </div>
+    <p class="card-note">All deals by stage (open and closed), for the selected pipeline &mdash; never blended across pipelines.</p>
+    <canvas id="chart-stages" height="200"></canvas>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Last 3 Weeks Performance Monitor</h2>
+    </div>
+    <div class="table-wrap">
+      <table id="perf-table">
+        <thead><tr id="perf-head"></tr></thead>
+        <tbody id="perf-body"><tr><td class="loading-row">loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Leads by Lead Status</h2>
+    </div>
+    <canvas id="chart-status" height="220"></canvas>
+  </section>
+
+</main>
+
+<footer class="foot">
+  Data via the local read-only API on <code>localhost:8420</code> &middot; never writes to Zoho.
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script src="ist.js"></script>
+</body>
+</html>

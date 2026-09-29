@@ -1,8 +1,8 @@
 {
-  "_comment": "Revenue targets in rupees. Zoho holds no quota data, so targets live here. Edit each quarter. '_default' applies to any owner without an explicit entry; omit an owner to fall back to it. Company target is the number shown when no owner filter is applied.",
+  "_comment": "Revenue targets in rupees. Zoho holds no quota data, so targets live here. Edit each quarter. '_default' applies to any owner without an explicit entry; omit an owner to fall back to it. Company target is the number shown when no owner filter is applied. 2026-09 corrected to 6000000 from the real 'Revenue Target - This Month' widget on the native Zoho IST Dashboard (screenshotted 2026-09-29, showed Target: Rs 60,00,000) - the placeholder default is still a guess for months without direct evidence.",
   "company_monthly_inr": {
     "_default": 40000000,
-    "2026-09": 40000000,
+    "2026-09": 6000000,
     "2026-10": 40000000
   },
   "owner_monthly_inr": {

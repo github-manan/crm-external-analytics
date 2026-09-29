@@ -24,6 +24,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
+import ist
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
@@ -234,6 +235,21 @@ def ep_weekly_options(_):
             "current_week": weekly.week_bounds()[0]}
 
 
+# --- IST dashboard (replicates a native Zoho CRM Analytics dashboard) -------
+
+def ep_ist_deals_by_stage(query):
+    return {"rows": ist.deals_by_stage(query.get("owner", [None])[0])}
+
+
+def ep_ist_lead_status(query):
+    return {"rows": ist.lead_status(query.get("owner", [None])[0])}
+
+
+def ep_ist_performance(query):
+    weeks = min(int(query.get("weeks", ["3"])[0]), 26)
+    return {"rows": ist.performance_weeks(weeks, query.get("owner", [None])[0])}
+
+
 ROUTES = {
     "/api/weekly/summary": ep_weekly_summary,
     "/api/weekly/journey": ep_weekly_journey,
@@ -241,6 +257,9 @@ ROUTES = {
     "/api/weekly/movement": ep_weekly_movement,
     "/api/weekly/attention": ep_weekly_attention,
     "/api/weekly/options": ep_weekly_options,
+    "/api/ist/deals_by_stage": ep_ist_deals_by_stage,
+    "/api/ist/lead_status": ep_ist_lead_status,
+    "/api/ist/performance": ep_ist_performance,
     "/api/meta": ep_meta,
     "/api/views": ep_views,
     "/api/bookings/fiscal": ep_bookings_fiscal,

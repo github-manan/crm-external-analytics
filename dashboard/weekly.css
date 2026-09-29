@@ -76,6 +76,13 @@ header {
 h1 { font-size: 22px; font-weight: 650; margin: 0 0 3px; letter-spacing: -0.01em; }
 .subtitle { color: var(--ink-2); font-size: 13px; }
 
+.dash-nav { display: flex; gap: 6px; margin-bottom: 8px; }
+.dash-nav a {
+  font-size: 12px; color: var(--ink-muted); text-decoration: none;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+}
+.dash-nav a.current { color: var(--series-1); background: rgba(42, 120, 214, 0.1); border-color: transparent; font-weight: 600; }
+
 .filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field label {

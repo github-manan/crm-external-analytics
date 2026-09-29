@@ -148,17 +148,25 @@ def journey(week=None, owner=None, scope="all"):
         date_params = [start, end]
 
     statuses = ",".join("?" for _ in CONTACTED_STATUSES)
+    # EXISTS rather than a LEFT JOIN to v_deals: SQLite won't push the
+    # idx_deals_contact_id expression index through a LEFT JOIN across two
+    # views, so the join was a full nested-loop scan (~35s on the full
+    # dataset). The EXISTS form lets the planner use the index per lead
+    # (~0.3s) and returns identical counts - verified against the join form
+    # before switching.
     r = one(f"""
         SELECT
             COUNT(DISTINCT l.id) lead,
             COUNT(DISTINCT CASE WHEN l.lead_status IN ({statuses}) OR l.is_converted = 1
                                 THEN l.id END) contacted,
             COUNT(DISTINCT CASE WHEN l.is_converted = 1 THEN l.id END) converted,
-            COUNT(DISTINCT CASE WHEN d.id IS NOT NULL THEN l.id END) action,
-            COUNT(DISTINCT CASE WHEN d.is_won = 1 THEN l.id END) won
+            COUNT(DISTINCT CASE WHEN l.is_converted = 1 AND EXISTS(
+                SELECT 1 FROM v_deals d WHERE d.contact_id = l.converted_contact_id
+            ) THEN l.id END) action,
+            COUNT(DISTINCT CASE WHEN l.is_converted = 1 AND EXISTS(
+                SELECT 1 FROM v_deals d WHERE d.contact_id = l.converted_contact_id AND d.is_won = 1
+            ) THEN l.id END) won
         FROM v_leads l
-        LEFT JOIN v_deals d
-               ON d.contact_id = l.converted_contact_id AND l.is_converted = 1
         WHERE 1=1{date_filter}{w}
     """, list(CONTACTED_STATUSES) + date_params + p)
 

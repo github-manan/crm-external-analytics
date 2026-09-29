@@ -343,6 +343,24 @@ def main():
         count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
         print(f"  {name:<24} {count:>7} rows")
 
+    # SQLite can't index a view, but it can index the same json_extract
+    # expression on the underlying table, and its planner matches that
+    # against a view's WHERE/join clauses. Without this, joining v_leads to
+    # v_deals on the converted contact (weekly.journey) took ~35s instead of
+    # milliseconds - every lead's converted contact was compared against
+    # every deal with nothing to narrow the search.
+    conn.executescript("""
+        DROP INDEX IF EXISTS idx_deals_contact_id;
+        CREATE INDEX idx_deals_contact_id
+            ON records(json_extract(payload, '$.Contact_Name.id'))
+            WHERE module = 'Deals' AND is_deleted = 0;
+
+        DROP INDEX IF EXISTS idx_leads_converted_contact_id;
+        CREATE INDEX idx_leads_converted_contact_id
+            ON records(json_extract(payload, '$.Converted_Contact.id'))
+            WHERE module = 'Leads' AND is_deleted = 0;
+    """)
+
     conn.commit()
     conn.close()
     print(f"\n{len(VIEWS)} views built in {DB_PATH}")

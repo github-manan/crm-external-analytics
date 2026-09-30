@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM Assistant</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="chat.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-title">
+    <nav class="dash-nav">
+      <a href="index.html">Overall</a>
+      <a href="weekly.html">Weekly Review</a>
+      <a href="ist.html">IST Dashboard</a>
+      <a href="chat.html" class="current">Assistant</a>
+    </nav>
+    <h1>CRM Assistant</h1>
+    <p class="subtitle">Runs entirely on this machine (Ollama) &middot; never sends CRM data anywhere &middot; read-only</p>
+  </div>
+  <div class="topbar-meta">
+    <span id="sync-status" class="pill pill-muted">checking&hellip;</span>
+  </div>
+</header>
+
+<main id="app" style="padding-top:1.25rem;">
+  <div class="chat-wrap">
+    <div class="suggestions" id="suggestions"></div>
+    <div class="chat-log" id="chat-log">
+      <div class="msg bot">
+        <div class="bubble">Hi — ask me about leads, deals, pipeline, reps, or targets. Everything I say comes from the same read-only data the dashboards use.</div>
+      </div>
+    </div>
+    <form class="chat-input" id="chat-form">
+      <textarea id="chat-text" rows="1" placeholder="e.g. Which rep has the highest revenue this year?"></textarea>
+      <button type="submit" id="chat-send">Ask</button>
+    </form>
+  </div>
+</main>
+
+<footer class="foot">
+  Data via the local read-only API on <code>localhost:8420</code> &middot; model via <code>localhost:11434</code> (Ollama) &middot; never writes to Zoho.
+</footer>
+
+<script src="chat.js"></script>
+</body>
+</html>

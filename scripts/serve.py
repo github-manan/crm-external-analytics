@@ -25,6 +25,7 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import ist
+import chatbot
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
@@ -273,31 +274,33 @@ ROUTES = {
 }
 
 
+def ep_chat(body):
+    """The only endpoint that isn't a plain read of the views - it calls a
+    local (never external) LLM, which itself can only call the same
+    read-only tool functions the rest of this API exposes. See chatbot.py.
+    """
+    message = (body or {}).get("message", "").strip()
+    if not message:
+        return {"error": "pass {\"message\": \"...\"}"}, 400
+    history = (body or {}).get("history", [])
+    try:
+        return chatbot.ask(message, history)
+    except Exception as error:  # noqa: BLE001 - surface it to the chat UI, don't 500 silently
+        return {"error": str(error)}, 500
+
+
+POST_ROUTES = {
+    "/api/chat": ep_chat,
+}
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        if not parsed.path.startswith("/api"):
-            return super().do_GET()  # static file from dashboard/
-
-        query = urllib.parse.parse_qs(parsed.query)
-        status = 200
-
-        if parsed.path in ROUTES:
-            result = ROUTES[parsed.path](query)
-        elif parsed.path.startswith("/api/view/"):
-            result = ep_view(query, parsed.path[len("/api/view/"):])
-        elif parsed.path in ("/api", "/api/"):
-            result = {"endpoints": sorted(ROUTES) + ["/api/view/<view_name>"]}
-        else:
-            result = ({"error": f"no such endpoint '{parsed.path}'",
-                       "endpoints": sorted(ROUTES)}, 404)
-
+    def _write_json(self, result, status=200):
         if isinstance(result, tuple):
             result, status = result
-
         body = json.dumps(result, indent=2, default=str).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -305,6 +308,39 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if not parsed.path.startswith("/api"):
+            return super().do_GET()  # static file from dashboard/
+
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if parsed.path in ROUTES:
+            result = ROUTES[parsed.path](query)
+        elif parsed.path.startswith("/api/view/"):
+            result = ep_view(query, parsed.path[len("/api/view/"):])
+        elif parsed.path in ("/api", "/api/"):
+            result = {"endpoints": sorted(ROUTES) + sorted(POST_ROUTES) + ["/api/view/<view_name>"]}
+        else:
+            result = ({"error": f"no such endpoint '{parsed.path}'",
+                       "endpoints": sorted(ROUTES)}, 404)
+
+        self._write_json(result)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path not in POST_ROUTES:
+            return self._write_json({"error": f"no such endpoint '{parsed.path}'"}, 404)
+
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            return self._write_json({"error": "invalid JSON body"}, 400)
+
+        self._write_json(POST_ROUTES[parsed.path](body))
 
     def log_message(self, fmt, *args):
         sys.stderr.write(f"  {fmt % args}\n")

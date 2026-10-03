@@ -240,10 +240,20 @@ async function loadLeadStatus() {
 
 // ---------- owner filter ----------
 
+// "Admin MitKat" owns 3,341 of 10,547 leads at a 38% conversion rate vs.
+// 1-9% for every named rep with real volume (found during the ML baseline
+// experiment) - almost certainly a bulk-import/default queue, not a
+// person. Labeled here too so filtering by it doesn't read as filtering
+// to an individual rep.
+const NON_INDIVIDUAL_OWNERS = new Set(['Admin MitKat']);
+function ownerLabel(name) {
+  return NON_INDIVIDUAL_OWNERS.has(name) ? `${name} (not an individual — bulk/default queue)` : name;
+}
+
 async function initOwnerFilter() {
   const { owners } = await getJSON('/api/weekly/options');
   const sel = document.getElementById('owner');
-  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${o}">${o}</option>`).join('');
+  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${o}">${ownerLabel(o)}</option>`).join('');
   sel.addEventListener('change', async () => {
     state.owner = sel.value;
     await loadAll();
@@ -251,6 +261,64 @@ async function initOwnerFilter() {
 }
 
 document.getElementById('source-scope').addEventListener('change', (e) => loadSources(e.target.value));
+
+// ---------- hot leads ----------
+
+async function loadHotLeads() {
+  const { rows } = await getJSON('/api/leads/hot?limit=15');
+  const tbody = document.querySelector('#hot-leads-table tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No open leads to score for this owner.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.company)}</td>
+      <td>${esc(r.lead_source)}</td>
+      <td>${esc(r.industry)}</td>
+      <td class="num">${r.days_since_update.toFixed(0)}d ago</td>
+      <td class="num">${r.score}</td>
+    </tr>`).join('');
+}
+
+// ---------- segment lookup ----------
+
+async function runSegmentLookup() {
+  const dimension = document.getElementById('segment-dimension').value;
+  const value = document.getElementById('segment-value').value.trim();
+  const out = document.getElementById('segment-result');
+  if (!value) {
+    out.innerHTML = '<span class="seg-error">Enter a value to look up.</span>';
+    return;
+  }
+  out.innerHTML = '<span class="card-note">looking up&hellip;</span>';
+  try {
+    const data = await fetch(`/api/segments/diagnostic?dimension=${encodeURIComponent(dimension)}&value=${encodeURIComponent(value)}`).then(r => r.json());
+    if (data.error) {
+      out.innerHTML = `<span class="seg-error">${esc(data.error)}</span>`;
+      return;
+    }
+    const isPipeline = data.dimension === 'pipeline';
+    const rate = isPipeline ? data.win_rate : data.conversion_rate;
+    const companyRate = isPipeline ? data.company_win_rate : data.company_conversion_rate;
+    const metricLabel = isPipeline ? 'win rate' : 'conversion rate';
+    const variantsNote = data.matched_variants
+      ? `<div class="seg-note">Matched variants merged: ${data.matched_variants.map(esc).join(', ')}</div>` : '';
+    const warnNote = data.sample_size_warning ? `<div class="seg-warn">${esc(data.sample_size_warning)}</div>` : '';
+    out.innerHTML = `
+      <div class="seg-headline">${esc(data.value)}: ${(rate * 100).toFixed(1)}% ${metricLabel}
+        vs ${(companyRate * 100).toFixed(1)}% company average (${data.vs_company})</div>
+      <div class="seg-note">${esc(data.note || '')}</div>
+      ${variantsNote}${warnNote}
+    `;
+  } catch (e) {
+    out.innerHTML = '<span class="seg-error">Lookup failed - see console.</span>';
+    console.error(e);
+  }
+}
+document.getElementById('segment-go').addEventListener('click', runSegmentLookup);
+document.getElementById('segment-value').addEventListener('keydown', (e) => { if (e.key === 'Enter') runSegmentLookup(); });
 
 // ---------- orchestration ----------
 
@@ -262,6 +330,7 @@ async function loadAll() {
     loadStages(),
     loadPerformance(),
     loadLeadStatus(),
+    loadHotLeads(),
   ]);
 }
 

@@ -41,3 +41,32 @@
 .source-list { font-size: 0.82rem; margin-top: 0.5rem; }
 .source-list .src-row { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid var(--border); }
 .source-list .src-row:last-child { border-bottom: none; }
+
+/* Segment lookup */
+.card-controls input[type="text"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  font: inherit;
+  min-width: 180px;
+}
+.card-controls input[type="text"]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.card-controls button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.35rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease);
+}
+.card-controls button:hover { transform: translateY(-1px); }
+.segment-result { font-size: 0.88rem; }
+.segment-result .seg-headline { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.3rem; }
+.segment-result .seg-note { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.3rem; }
+.segment-result .seg-warn { color: var(--warn); font-size: 0.8rem; margin-top: 0.3rem; }
+.segment-result .seg-error { color: #b91c1c; }
+@media (prefers-color-scheme: dark) { .segment-result .seg-error { color: #f87171; } }

@@ -119,6 +119,48 @@
     <canvas id="chart-status" height="220"></canvas>
   </section>
 
+  <section class="card">
+    <div class="card-head">
+      <h2>Hot Leads</h2>
+      <span class="card-note">Respects the Owner filter above</span>
+    </div>
+    <p class="card-note">Heuristic score (recency + historical source/industry conversion rate), not a prediction &mdash; see <a href="chat.html">Assistant</a> for the same scoring with more detail per lead.</p>
+    <div class="table-wrap">
+      <table id="hot-leads-table">
+        <thead>
+          <tr>
+            <th>Lead</th>
+            <th>Company</th>
+            <th>Source</th>
+            <th>Industry</th>
+            <th class="num">Last updated</th>
+            <th class="num">Score</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" class="loading-row">loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Segment Lookup</h2>
+    </div>
+    <p class="card-note">How a pipeline, industry, or country is performing vs. the company average.</p>
+    <div class="card-controls" style="margin-bottom: 0.8rem;">
+      <label for="segment-dimension">Dimension</label>
+      <select id="segment-dimension">
+        <option value="pipeline">Pipeline</option>
+        <option value="industry">Industry</option>
+        <option value="country">Country</option>
+      </select>
+      <label for="segment-value">Value</label>
+      <input type="text" id="segment-value" placeholder="e.g. Datasurfr, BFSI, India">
+      <button id="segment-go" type="button">Check</button>
+    </div>
+    <div id="segment-result" class="segment-result"></div>
+  </section>
+
 </main>
 
 <footer class="foot">

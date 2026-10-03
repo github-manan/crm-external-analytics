@@ -25,6 +25,17 @@ function fmtInt(n) {
   return (n ?? 0).toLocaleString('en-IN');
 }
 
+// "Admin MitKat" owns 3,341 of 10,547 leads at a 38% conversion rate vs.
+// 1-9% for every named rep with real volume (found while building the ML
+// baseline experiment) - almost certainly a bulk-import/default queue, not
+// a person. Labeled wherever it could be mistaken for an individual rep,
+// rather than hidden (hiding it would make this page's totals stop
+// matching the company-wide KPIs above it).
+const NON_INDIVIDUAL_OWNERS = new Set(['Admin MitKat']);
+function ownerLabel(name) {
+  return NON_INDIVIDUAL_OWNERS.has(name) ? `${name} (not an individual — bulk/default queue)` : name;
+}
+
 function monthName(m) {
   return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1] ?? m;
 }
@@ -407,7 +418,7 @@ async function loadRepsTable(fiscalYear) {
     .sort((a, b) => b.revenue_inr - a.revenue_inr)
     .map(r => `
       <tr>
-        <td>${r.owner_name}</td>
+        <td>${ownerLabel(r.owner_name)}</td>
         <td class="num">${fmtInt(r.deals_won)}</td>
         <td class="num">${fmtCr(r.revenue_inr)}
           <span class="rank-bar" style="width:${Math.max(4, (r.revenue_inr / maxRevenue) * 60)}px"></span>
@@ -461,9 +472,9 @@ async function loadDataQuality() {
 
 // ---------- wire up filters ----------
 
-function populateSelect(el, values, { withAll = true, allLabel = 'All' } = {}) {
+function populateSelect(el, values, { withAll = true, allLabel = 'All', labelFn = (v) => v } = {}) {
   const opts = withAll ? [`<option value="">${allLabel}</option>`] : [];
-  opts.push(...values.map(v => `<option value="${v}">${v}</option>`));
+  opts.push(...values.map(v => `<option value="${v}">${labelFn(v)}</option>`));
   el.innerHTML = opts.join('');
 }
 
@@ -511,7 +522,7 @@ async function main() {
   const { rows: repRows } = await getJSON('/api/reps');
   const repFilter = document.getElementById('rep-filter');
   const granularityFilter = document.getElementById('granularity-filter');
-  populateSelect(repFilter, repRows.map(r => r.owner_name).sort(), { allLabel: 'All reps' });
+  populateSelect(repFilter, repRows.map(r => r.owner_name).sort(), { allLabel: 'All reps', labelFn: ownerLabel });
   const refreshRepTrend = () => loadRepTrendChart(repFilter.value, granularityFilter.value);
   repFilter.addEventListener('change', refreshRepTrend);
   granularityFilter.addEventListener('change', refreshRepTrend);

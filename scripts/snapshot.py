@@ -16,6 +16,9 @@ import sqlite3
 import sys
 from datetime import date
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import data_quality
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
 
@@ -57,6 +60,8 @@ def main():
     print(f"Snapshot {as_of}: {rows} open deals, {value/10_000_000:.2f} cr")
     print(f"History depth: {days} day(s) captured")
     conn.close()
+
+    data_quality.snapshot(as_of)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ import ist
 import leads
 import segments
 import contacts
+import data_quality
 from ddgs import DDGS
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -50,6 +51,7 @@ Hard rules:
 5. {TODAY_NOTE} You have also stated a fabricated date range ("Dec 11-17") for "last week" that matched nothing in the actual data. Tool results that include week_start/week_end or similar date fields carry the real dates - quote those, never invent a date range yourself.
 6. Money is in Indian Rupees. Every "*_inr" field comes with a "*_inr_fmt" sibling (e.g. revenue_inr_fmt: "₹80.78 Cr") - always quote that pre-formatted string exactly as given. Do not convert the raw rupee number yourself; you have gotten that arithmetic wrong before.
 7. When useful, briefly name which figure/tool your answer is based on, so it's checkable.
+8. get_data_quality_progress's each metric has a "trend" field - if it says "NO TREND YET", say plainly that tracking just started and there's nothing to compare yet. Never say a number is "up", "improving", or "increasing" unless that metric's own "trend" field says "improved" - you have invented "up from previous periods" out of nothing before.
 
 Keep answers short and direct - this is a chat widget, not a report."""
 
@@ -322,11 +324,16 @@ def tool_account_contacts(args):
     return contacts.account_contacts(account)
 
 
+def tool_data_quality(_args):
+    return data_quality.current()
+
+
 TOOLS = {
     "get_hot_leads": tool_hot_leads,
     "search_company_background": tool_search_company_background,
     "get_segment_diagnostic": tool_segment_diagnostic,
     "get_account_contacts": tool_account_contacts,
+    "get_data_quality_progress": tool_data_quality,
     "get_bookings_by_fiscal_year": tool_bookings_fiscal,
     "get_bookings_monthly": tool_bookings_monthly,
     "get_pipeline_overview": tool_pipeline_overview,
@@ -470,6 +477,11 @@ TOOL_SCHEMA = [
             "account_name": {"type": "string"},
         }, "required": ["account_name"]},
     }},
+    {"type": "function", "function": {
+        "name": "get_data_quality_progress",
+        "description": "How complete the CRM's own data entry is right now, and whether that's improved since this started being tracked - activity logging on open deals, real loss reasons on Closed Lost deals, closing dates on open deals, and subscription end dates on Renewal-pipeline deals. Use for 'is the data getting better / is the team filling things in' questions - NOT a sales metric, this is about data entry completeness.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
 ]
 
 
@@ -580,6 +592,17 @@ def _headline_hot_leads(data):
     return f"Hottest lead: {top['name']} at {top['company']} (score {top['score']}/100)"
 
 
+def _headline_data_quality(data):
+    metrics = data.get("metrics")
+    if not metrics:
+        return None
+    worst = min((m for m in metrics if m.get("pct") is not None), key=lambda m: m["pct"], default=None)
+    if not worst:
+        return None
+    base = f"Lowest-filled: {worst['label']} - {worst['numerator']}/{worst['denominator']} ({worst['pct']}%)"
+    return base + " (tracking just started - no trend yet)" if data.get("note") else base
+
+
 HEADLINE_BUILDERS = {
     "get_rep_performance": _headline_rep_performance,
     "get_pipeline_overview": _headline_pipeline_overview,
@@ -593,6 +616,7 @@ HEADLINE_BUILDERS = {
     "get_hot_leads": _headline_hot_leads,
     "get_segment_diagnostic": _headline_segment_diagnostic,
     "get_account_contacts": _headline_account_contacts,
+    "get_data_quality_progress": _headline_data_quality,
 }
 
 

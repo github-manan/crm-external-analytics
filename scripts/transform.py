@@ -335,6 +335,18 @@ def main():
             owner_name    TEXT,
             PRIMARY KEY (snapshot_date, deal_id)
         );
+
+        -- Daily fill-rate history for the data-quality asks sent to the
+        -- sales team (see scripts/data_quality.py) - tracks whether those
+        -- fixes are actually happening, rather than re-checking by eye.
+        CREATE TABLE IF NOT EXISTS data_quality_snapshots (
+            snapshot_date TEXT NOT NULL,
+            metric_key    TEXT NOT NULL,
+            numerator     INTEGER,
+            denominator   INTEGER,
+            pct           REAL,
+            PRIMARY KEY (snapshot_date, metric_key)
+        );
     """)
 
     for name, body in VIEWS.items():

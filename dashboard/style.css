@@ -201,6 +201,9 @@ tbody tr { transition: background-color 0.12s var(--ease); }
 tbody tr:hover { background: var(--accent-soft); }
 .loading-row, .empty-row { color: var(--text-muted); text-align: center; padding: 1.2rem; }
 .rank-bar { display: inline-block; height: 6px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 3px; vertical-align: middle; margin-left: 0.5rem; }
+.trend-up { color: var(--good); font-weight: 600; }
+.trend-down { color: var(--warn); font-weight: 600; }
+.trend-note { color: var(--text-muted); font-style: italic; }
 
 .foot { text-align: center; color: var(--text-muted); font-size: 0.78rem; padding: 1.5rem 1rem 0; }
 .foot code { background: var(--accent-soft); padding: 0.1rem 0.4rem; border-radius: 5px; }

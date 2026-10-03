@@ -360,6 +360,47 @@ async function loadRepsTable(fiscalYear) {
     `).join('');
 }
 
+// ---------- data quality ----------
+
+async function loadDataQuality() {
+  const tbody = document.querySelector('#dq-table tbody');
+  const asofEl = document.getElementById('dq-asof');
+  try {
+    const dq = await getJSON('/api/data-quality');
+    if (dq.error) {
+      asofEl.textContent = dq.error;
+      tbody.innerHTML = '<tr><td colspan="3" class="empty-row">No snapshot yet &mdash; run scripts/data_quality.py</td></tr>';
+      return;
+    }
+    const sameDay = dq.tracking_since === dq.as_of;
+    asofEl.textContent = sameDay
+      ? `tracking started today (${dq.as_of})`
+      : `${dq.as_of} &middot; tracking since ${dq.tracking_since}`.replace('&middot;', '·');
+
+    tbody.innerHTML = dq.metrics.map(m => {
+      const pct = m.pct ?? 0;
+      const trend = sameDay
+        ? '<span class="trend-note">no trend yet</span>'
+        : (m.change_pct_points === undefined
+            ? '<span class="trend-note">n/a</span>'
+            : `<span class="${m.change_pct_points > 0 ? 'trend-up' : m.change_pct_points < 0 ? 'trend-down' : 'trend-note'}">${m.change_pct_points > 0 ? '+' : ''}${m.change_pct_points}pt</span>`);
+      return `
+        <tr>
+          <td>${m.label}</td>
+          <td class="num">${m.numerator}/${m.denominator} (${m.pct ?? 'n/a'}%)
+            <span class="rank-bar" style="width:${Math.max(4, pct * 0.6)}px"></span>
+          </td>
+          <td class="num">${trend}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    asofEl.textContent = 'unavailable';
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-row">Failed to load</td></tr>';
+    console.error(e);
+  }
+}
+
 // ---------- wire up filters ----------
 
 function populateSelect(el, values, { withAll = true, allLabel = 'All' } = {}) {
@@ -407,6 +448,8 @@ async function main() {
   populateSelect(fyFilter, fiscalRows.map(r => r.fiscal_year).reverse(), { allLabel: 'All years' });
   fyFilter.addEventListener('change', () => loadRepsTable(fyFilter.value));
   await loadRepsTable('');
+
+  await loadDataQuality();
 }
 
 main().catch(err => {

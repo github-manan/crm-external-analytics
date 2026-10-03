@@ -28,6 +28,7 @@ import ist
 import leads
 import segments
 import contacts
+import data_quality
 import chatbot
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -275,10 +276,15 @@ def ep_account_contacts(query):
     return contacts.account_contacts(account_name)
 
 
+def ep_data_quality(_query):
+    return data_quality.current()
+
+
 ROUTES = {
     "/api/leads/hot": ep_leads_hot,
     "/api/segments/diagnostic": ep_segment_diagnostic,
     "/api/contacts/account": ep_account_contacts,
+    "/api/data-quality": ep_data_quality,
     "/api/weekly/summary": ep_weekly_summary,
     "/api/weekly/journey": ep_weekly_journey,
     "/api/weekly/sources": ep_weekly_sources,

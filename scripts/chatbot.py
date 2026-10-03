@@ -457,15 +457,15 @@ TOOL_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "get_segment_diagnostic",
-        "description": "How a specific segment is performing vs. the company average - use for 'how are we doing in X' or 'how do we increase sales in X' questions. 'dimension' must be exactly one of: 'pipeline' (e.g. value='Datasurfr' - gives deal win rate + open deals by stage), 'industry' (e.g. value='BFSI' - gives lead conversion rate), or 'country' (e.g. value='India' - gives lead conversion rate). Industry/country diagnostics are about lead conversion, NOT deal revenue - deals in this CRM don't carry industry/country. Always check for a sample_size_warning before treating the result as reliable.",
+        "description": "How a specific segment is performing vs. the company average - use for ANY 'how are we doing in X' / 'how do we increase sales in X' / 'leads in X' / 'conversion in X' question, for ANY X, including a country or region name. Pick dimension by what kind of thing X is: a COUNTRY OR PLACE NAME (India, US, USA, UK, Singapore, Qatar, Mumbai, Middle East, APAC, any nation/region/city) -> dimension='country'; an INDUSTRY/VERTICAL (BFSI, Technology, Manufacturing, Healthcare) -> dimension='industry'; one of our 4 named pipelines (Consulting, Datasurfr, MSS, Renewal) -> dimension='pipeline'. If X is a place name, ALWAYS use 'country', never 'industry' - this has been picked wrong before. Pipeline gives deal win rate; industry/country give lead conversion rate, NOT deal revenue (deals here don't carry industry/country). Always check for a sample_size_warning before treating the result as reliable.",
         "parameters": {"type": "object", "properties": {
             "dimension": {"type": "string", "enum": ["pipeline", "industry", "country"]},
-            "value": {"type": "string", "description": "The specific segment name, e.g. 'Datasurfr', 'BFSI', 'India'."},
+            "value": {"type": "string", "description": "The specific segment name, e.g. 'Datasurfr', 'BFSI', 'India', 'United States'."},
         }, "required": ["dimension", "value"]},
     }},
     {"type": "function", "function": {
         "name": "get_account_contacts",
-        "description": "Who to actually contact at a specific account/company - returns name and email (this CRM doesn't track role/title for contacts). Use for 'who should we contact at X' questions. Needs the exact account name as it appears in Zoho, not a fuzzy guess.",
+        "description": "Who to actually contact at a specific account/company - returns name and email (this CRM doesn't track role/title for contacts). Use for 'who should we contact at X' questions. Tries an exact match first, falls back to a partial match - if that's ambiguous you'll get a did_you_mean list back instead of contacts.",
         "parameters": {"type": "object", "properties": {
             "account_name": {"type": "string"},
         }, "required": ["account_name"]},

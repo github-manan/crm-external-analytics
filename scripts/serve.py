@@ -159,6 +159,16 @@ def ep_reps(query):
             ORDER BY revenue_inr DESC""", params)}
 
 
+def ep_rep_timeseries(query):
+    owner = query.get("owner", [None])[0]
+    granularity = query.get("granularity", ["monthly"])[0]
+    try:
+        return {"owner": owner or "All", "granularity": granularity,
+                "rows": weekly.rep_timeseries(owner, granularity)}
+    except ValueError as error:
+        return {"error": str(error)}, 400
+
+
 def ep_seasonality(_):
     return {"note": "Share of all-time won revenue by calendar month.", "rows": rows(
         """SELECT CAST(strftime('%m', closing_date) AS INTEGER) AS month,
@@ -301,6 +311,7 @@ ROUTES = {
     "/api/pipeline/open": ep_pipeline_open,
     "/api/pipeline/history": ep_pipeline_history,
     "/api/reps": ep_reps,
+    "/api/reps/timeseries": ep_rep_timeseries,
     "/api/seasonality": ep_seasonality,
     "/api/pipelines": ep_pipelines,
     "/api/query": ep_query,

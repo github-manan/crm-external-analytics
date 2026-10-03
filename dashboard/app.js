@@ -332,6 +332,64 @@ function renderHistoryChart(rows) {
   });
 }
 
+// ---------- individual performance trend ----------
+
+let repTrendChart;
+async function loadRepTrendChart(owner, granularity) {
+  const q = `?granularity=${encodeURIComponent(granularity)}` + (owner ? `&owner=${encodeURIComponent(owner)}` : '');
+  const { rows } = await getJSON('/api/reps/timeseries' + q);
+  const ctx = document.getElementById('chart-rep-trend');
+  repTrendChart?.destroy();
+
+  if (!rows.length) {
+    repTrendChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Revenue (Cr)', data: [] }] },
+      options: {
+        plugins: {
+          legend: { display: false },
+          subtitle: { display: true, text: 'No won deals with a closing date in this selection.', color: TICK_COLOR },
+        },
+        scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }) },
+      },
+    });
+    return;
+  }
+
+  repTrendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: rows.map(r => r.period),
+      datasets: [{
+        label: 'Revenue (Cr)',
+        data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
+        borderColor: PALETTE[0],
+        backgroundColor: PALETTE[0] + '22',
+        fill: true,
+        tension: 0.25,
+        pointRadius: rows.length > 60 ? 0 : 3,
+      }],
+    },
+    options: {
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const r = rows[c.dataIndex];
+              return [`Revenue: ${fmtCr(r.revenue_inr)}`, `Deals won: ${fmtInt(r.deals_won)}`];
+            },
+          },
+        },
+      },
+      scales: {
+        x: baseGrid({ ticks: { color: TICK_COLOR, maxTicksLimit: 14 }, grid: { display: false } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+      },
+    },
+  });
+}
+
 // ---------- reps table ----------
 
 async function loadRepsTable(fiscalYear) {
@@ -448,6 +506,16 @@ async function main() {
   populateSelect(fyFilter, fiscalRows.map(r => r.fiscal_year).reverse(), { allLabel: 'All years' });
   fyFilter.addEventListener('change', () => loadRepsTable(fyFilter.value));
   await loadRepsTable('');
+
+  // individual + granularity filter (rep trend chart)
+  const { rows: repRows } = await getJSON('/api/reps');
+  const repFilter = document.getElementById('rep-filter');
+  const granularityFilter = document.getElementById('granularity-filter');
+  populateSelect(repFilter, repRows.map(r => r.owner_name).sort(), { allLabel: 'All reps' });
+  const refreshRepTrend = () => loadRepTrendChart(repFilter.value, granularityFilter.value);
+  repFilter.addEventListener('change', refreshRepTrend);
+  granularityFilter.addEventListener('change', refreshRepTrend);
+  await refreshRepTrend();
 
   await loadDataQuality();
 }

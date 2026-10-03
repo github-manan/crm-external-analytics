@@ -338,3 +338,37 @@ def weeks_available(limit=26):
     today = date.today()
     monday = today - timedelta(days=today.weekday())
     return [(monday - timedelta(weeks=i)).isoformat() for i in range(limit)]
+
+
+# Bucket expressions all key off closing_date - the one trustworthy date
+# field on Deals (see transform.py trap 2). "yearly" uses fiscal_year
+# (Apr-Mar), not calendar year, to match "Bookings by fiscal year" already
+# shown elsewhere on the same dashboard - two different "yearly" cuts on
+# one page would be confusing.
+REP_TIMESERIES_BUCKETS = {
+    "daily": "closing_date",
+    "weekly": "date(closing_date, '-' || ((CAST(strftime('%w', closing_date) AS INTEGER) + 6) % 7) || ' days')",
+    "monthly": "strftime('%Y-%m', closing_date)",
+    "quarterly": "strftime('%Y', closing_date) || '-Q' || ((CAST(strftime('%m', closing_date) AS INTEGER) - 1) / 3 + 1)",
+    "yearly": "fiscal_year",
+}
+
+
+def rep_timeseries(owner=None, granularity="monthly"):
+    """One rep's (or everyone's) won deals/revenue over time, bucketed at
+    the given granularity. Won deals only, closing_date IS NOT NULL - same
+    338 deals missing it are excluded here as everywhere else revenue is
+    reported (see /api/meta caveats)."""
+    bucket = REP_TIMESERIES_BUCKETS.get(granularity)
+    if bucket is None:
+        raise ValueError(f"granularity must be one of {sorted(REP_TIMESERIES_BUCKETS)}")
+    w, p = owner_clause(owner)
+    return rows(f"""
+        SELECT {bucket} AS period,
+               COUNT(*) AS deals_won,
+               ROUND(SUM(amount_inr), 2) AS revenue_inr
+        FROM v_deals
+        WHERE is_won = 1 AND closing_date IS NOT NULL {w}
+        GROUP BY period
+        ORDER BY period
+    """, p)

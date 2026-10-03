@@ -112,7 +112,23 @@
         <select id="fy-filter"><option value="">All years</option></select>
       </div>
     </div>
-    <div class="table-wrap">
+
+    <div class="card-controls" style="margin-bottom: 0.8rem;">
+      <label for="rep-filter">Individual</label>
+      <select id="rep-filter"><option value="">All reps</option></select>
+      <label for="granularity-filter">View by</label>
+      <select id="granularity-filter">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly" selected>Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="yearly">Yearly (fiscal year)</option>
+      </select>
+    </div>
+    <p class="card-note">Won deals/revenue over time for the selected individual (or everyone) &mdash; "yearly" is the same April&ndash;March fiscal year used elsewhere on this page.</p>
+    <canvas id="chart-rep-trend" height="100"></canvas>
+
+    <div class="table-wrap" style="margin-top: 1.2rem;">
       <table id="reps-table">
         <thead>
           <tr>

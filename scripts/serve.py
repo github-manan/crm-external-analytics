@@ -25,6 +25,7 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import ist
+import leads
 import chatbot
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -251,7 +252,14 @@ def ep_ist_performance(query):
     return {"rows": ist.performance_weeks(weeks, query.get("owner", [None])[0])}
 
 
+def ep_leads_hot(query):
+    owner = query.get("owner", [None])[0]
+    limit = min(int(query.get("limit", ["20"])[0]), 100)
+    return {"rows": leads.hot_leads(owner, limit)}
+
+
 ROUTES = {
+    "/api/leads/hot": ep_leads_hot,
     "/api/weekly/summary": ep_weekly_summary,
     "/api/weekly/journey": ep_weekly_journey,
     "/api/weekly/sources": ep_weekly_sources,

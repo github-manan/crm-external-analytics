@@ -9,6 +9,13 @@ model could invent or get wrong by writing bad SQL.
 Runs entirely local via Ollama (http://localhost:11434) - no CRM data is
 ever sent to an external LLM provider, per the confirmed project
 constraint. Read-only: nothing here can write to Zoho or to data/crm.db.
+
+One deliberate exception to "nothing leaves this machine": search_company_background
+sends a company name to DuckDuckGo's public search (no API key, no account,
+via the `ddgs` package) so a rep can look up public background on a lead
+before contacting them. That's a company name leaving this machine, not
+CRM record data - approved explicitly as a separate decision from the
+no-external-LLM rule, not bundled into it.
 """
 
 import json
@@ -20,6 +27,8 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import ist
+import leads
+from ddgs import DDGS
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = os.environ.get("CHATBOT_MODEL", "llama3.2:3b")
@@ -31,6 +40,7 @@ SYSTEM_PROMPT = f"""You are a read-only analytics assistant for MitKat Advisory'
 Hard rules:
 1. Only state numbers that came from a tool call in this conversation. Never estimate, round to a "nice" number, or fill in a gap - if a tool didn't return something, say you don't have it.
 2. You cannot write, change, or create anything in the CRM. You only ever read.
+2b. search_company_background is the one exception to "nothing leaves this machine" - it sends a company name to a public web search. Only ever pass a company name to it, never a person's name or any other CRM field.
 3. Deals span 4 pipelines (Consulting, Datasurfr, MSS, Renewal) with different stage sets - never add numbers across pipelines yourself unless a tool already did it for you.
 3b. Never sum a list of numbers or pick the "highest"/"top" row from a list yourself - you have gotten this wrong before. Several tools already include a pre-computed answer field for exactly this (total_leads, top_by_revenue, top_by_deals_won, highest_open_value_pipeline, highest_won_value_pipeline) - use those. If a tool doesn't have one, say what you can and note you can't total/compare it reliably.
 4. This data has known gaps - if asked something these tools can't answer (why a deal was lost, which rep's activity predicts a closed deal, an exact reason a lead didn't convert), say plainly that the data doesn't support that, rather than guessing.
@@ -263,7 +273,41 @@ def tool_list_reps(_args):
     return {"reps": weekly.owners()}
 
 
+def tool_hot_leads(args):
+    owner = args.get("owner")
+    limit = min(int(args.get("limit", 10) or 10), 50)
+    rows = leads.hot_leads(owner, limit)
+    return {
+        "note": ("Heuristic score, not a prediction - combines how recently the lead "
+                 "was last updated with how well its source/industry have historically "
+                 "converted. This CRM doesn't log enough call/email activity to score "
+                 "true engagement, so 'recently updated' is the best available stand-in."),
+        "leads": rows,
+    }
+
+
+def tool_search_company_background(args):
+    """The one tool that sends data off this machine - a company name goes
+    to DuckDuckGo's public search (ddgs package, no key/account needed).
+    Never pass lead/contact personal names here, only the company name.
+    """
+    query = (args.get("company") or "").strip()
+    if not query:
+        return {"error": "no company name given"}
+    try:
+        results = DDGS().text(f"{query} company", max_results=5)
+    except Exception as error:  # noqa: BLE001 - network call, surface failure don't crash the loop
+        return {"error": f"search failed: {error}"}
+    return {
+        "note": "Public web search results, external to this CRM - verify before relying on them.",
+        "query": query,
+        "results": [{"title": r.get("title"), "snippet": r.get("body"), "url": r.get("href")} for r in results],
+    }
+
+
 TOOLS = {
+    "get_hot_leads": tool_hot_leads,
+    "search_company_background": tool_search_company_background,
     "get_bookings_by_fiscal_year": tool_bookings_fiscal,
     "get_bookings_monthly": tool_bookings_monthly,
     "get_pipeline_overview": tool_pipeline_overview,
@@ -377,6 +421,21 @@ TOOL_SCHEMA = [
         "description": "The exact list of sales rep names as they appear in the CRM. Call this before filtering by a rep name you're not 100% sure is spelled/cased correctly.",
         "parameters": {"type": "object", "properties": {}},
     }},
+    {"type": "function", "function": {
+        "name": "get_hot_leads",
+        "description": "Ranks currently-open leads by a heuristic 'hotness' score (recency of update + historical conversion rate of their source/industry). Use for 'which lead should I pick up next' or 'what are our hottest leads' questions. This is a heuristic, not a prediction - always mention that when answering.",
+        "parameters": {"type": "object", "properties": {
+            "owner": {"type": "string", "description": "Filter to one rep's leads. Omit for everyone."},
+            "limit": {"type": "integer", "description": "How many leads to return, default 10."},
+        }},
+    }},
+    {"type": "function", "function": {
+        "name": "search_company_background",
+        "description": "Public web search for background on a company (what they do, size, news) - use before suggesting a rep contact a lead, to give them context. This is the ONLY tool that sends anything (the company name) outside this machine - never pass a person's name, only the company.",
+        "parameters": {"type": "object", "properties": {
+            "company": {"type": "string", "description": "Company name to search for."},
+        }, "required": ["company"]},
+    }},
 ]
 
 
@@ -461,6 +520,13 @@ def _headline_weekly_kpis(data):
     return f"Week of {ws} to {we}: {leads:,} leads"
 
 
+def _headline_hot_leads(data):
+    top = (data.get("leads") or [None])[0]
+    if not top:
+        return None
+    return f"Hottest lead: {top['name']} at {top['company']} (score {top['score']}/100)"
+
+
 HEADLINE_BUILDERS = {
     "get_rep_performance": _headline_rep_performance,
     "get_pipeline_overview": _headline_pipeline_overview,
@@ -471,6 +537,7 @@ HEADLINE_BUILDERS = {
     "get_revenue_comparison": _headline_revenue_comparison,
     "get_lead_journey": _headline_lead_journey,
     "get_weekly_kpis": _headline_weekly_kpis,
+    "get_hot_leads": _headline_hot_leads,
 }
 
 

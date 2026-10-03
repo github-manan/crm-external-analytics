@@ -5,7 +5,7 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 130px);
+  height: calc(100vh - 150px);
   min-height: 420px;
 }
 
@@ -14,61 +14,78 @@
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1rem;
+  border-radius: var(--radius, 14px);
+  padding: 1.1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.9rem;
+  box-shadow: var(--shadow);
+  scroll-behavior: smooth;
 }
 
-.msg { display: flex; flex-direction: column; max-width: 85%; }
+.msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+  animation: rise 0.25s var(--ease, ease-out);
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .msg.user { align-self: flex-end; align-items: flex-end; }
 .msg.bot { align-self: flex-start; align-items: flex-start; }
 
 .msg .bubble {
-  padding: 0.55rem 0.85rem;
-  border-radius: 12px;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  padding: 0.65rem 0.95rem;
+  border-radius: 14px;
+  font-size: 0.92rem;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
-.msg.user .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
-.msg.bot .bubble { background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
-.msg.bot .bubble.error { border-color: #b91c1c; color: #b91c1c; }
+.msg.user .bubble {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 2px 10px -3px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.msg.bot .bubble { background: var(--surface-2, var(--bg)); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.msg.bot .bubble.error { border-color: #b91c1c; color: #b91c1c; background: color-mix(in srgb, #b91c1c 6%, var(--surface)); }
 
 .msg.bot .headline {
   align-self: flex-start;
   background: var(--accent-soft, #e8effe);
   color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  padding: 0.5rem 0.8rem;
-  font-size: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 12px;
+  padding: 0.6rem 0.9rem;
+  font-size: 1.02rem;
   font-weight: 700;
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.2rem;
   max-width: 100%;
+  box-shadow: var(--shadow-sm);
 }
 .msg.bot .headline-note {
   font-size: 0.68rem;
   color: var(--text-muted);
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
   font-style: italic;
 }
 
 .msg .tool-trace {
   font-size: 0.72rem;
   color: var(--text-muted);
-  margin-top: 0.25rem;
+  margin-top: 0.3rem;
   padding-left: 0.2rem;
 }
 
 .verified-data {
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
   font-size: 0.78rem;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
   max-width: 100%;
   overflow-x: auto;
 }
@@ -76,11 +93,12 @@
   cursor: pointer;
   color: var(--accent);
   font-weight: 600;
+  user-select: none;
 }
 .verified-data summary code { font-weight: 500; }
 .verified-data table { border-collapse: collapse; margin: 0.4rem 0; width: 100%; }
 .verified-data th, .verified-data td {
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.55rem;
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -88,53 +106,71 @@
 .verified-data th { color: var(--text-muted); font-weight: 600; }
 .verified-data .fact-key { color: var(--text-muted); }
 .verified-data .fact-label { font-weight: 600; margin-top: 0.4rem; color: var(--text-muted); }
-.verified-data .fact-row { padding: 0.1rem 0; }
+.verified-data .fact-row { padding: 0.15rem 0; }
 .verified-data .empty { color: var(--text-muted); font-style: italic; }
+.verified-data a { color: var(--accent); }
 
+.msg.bot .bubble.thinking { color: var(--text-muted); }
 .msg.bot .bubble.thinking::after {
-  content: '...';
+  content: '';
+  display: inline-block;
+  width: 1.1em;
   animation: think 1.2s steps(4, end) infinite;
 }
 @keyframes think {
   0% { content: '.'; }
-  33% { content: '..'; }
-  66% { content: '...'; }
+  25% { content: '..'; }
+  50% { content: '...'; }
+  75% { content: ''; }
 }
 
 .chat-input {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
 }
 .chat-input textarea {
   flex: 1;
   resize: none;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  padding: 0.65rem 0.9rem;
   font: inherit;
   background: var(--surface);
   color: var(--text);
   max-height: 120px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s var(--ease, ease), box-shadow 0.15s var(--ease, ease);
+}
+.chat-input textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .chat-input button {
   border: none;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
-  border-radius: 10px;
-  padding: 0 1.2rem;
-  font-weight: 600;
+  border-radius: 12px;
+  padding: 0 1.3rem;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 2px 10px -3px color-mix(in srgb, var(--accent) 55%, transparent);
+  transition: transform 0.12s var(--ease, ease), box-shadow 0.12s var(--ease, ease);
 }
-.chat-input button:disabled { opacity: 0.5; cursor: default; }
+.chat-input button:hover:not(:disabled) { transform: translateY(-1px); }
+.chat-input button:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
 
-.suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.85rem; }
 .suggestions button {
   font-size: 0.78rem;
-  background: var(--accent-soft);
+  font-weight: 500;
+  background: var(--surface);
   color: var(--accent);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.8rem;
   cursor: pointer;
+  transition: background-color 0.15s var(--ease, ease), border-color 0.15s var(--ease, ease), transform 0.15s var(--ease, ease);
 }
+.suggestions button:hover { background: var(--accent-soft); border-color: var(--accent-2); transform: translateY(-1px); }

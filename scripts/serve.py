@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import ist
 import leads
+import segments
+import contacts
 import chatbot
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -258,8 +260,25 @@ def ep_leads_hot(query):
     return {"rows": leads.hot_leads(owner, limit)}
 
 
+def ep_segment_diagnostic(query):
+    dimension = query.get("dimension", [None])[0]
+    value = query.get("value", [None])[0]
+    if not dimension or not value:
+        return {"error": "pass ?dimension=pipeline|industry|country&value=..."}, 400
+    return segments.segment_diagnostic(dimension, value)
+
+
+def ep_account_contacts(query):
+    account_name = query.get("account_name", [None])[0]
+    if not account_name:
+        return {"error": "pass ?account_name=..."}, 400
+    return contacts.account_contacts(account_name)
+
+
 ROUTES = {
     "/api/leads/hot": ep_leads_hot,
+    "/api/segments/diagnostic": ep_segment_diagnostic,
+    "/api/contacts/account": ep_account_contacts,
     "/api/weekly/summary": ep_weekly_summary,
     "/api/weekly/journey": ep_weekly_journey,
     "/api/weekly/sources": ep_weekly_sources,

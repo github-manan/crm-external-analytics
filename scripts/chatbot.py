@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import ist
 import leads
+import segments
+import contacts
 from ddgs import DDGS
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -305,9 +307,26 @@ def tool_search_company_background(args):
     }
 
 
+def tool_segment_diagnostic(args):
+    dimension = (args.get("dimension") or "").strip().lower()
+    value = (args.get("value") or "").strip()
+    if not dimension or not value:
+        return {"error": "need both dimension (pipeline/industry/country) and value"}
+    return segments.segment_diagnostic(dimension, value)
+
+
+def tool_account_contacts(args):
+    account = (args.get("account_name") or "").strip()
+    if not account:
+        return {"error": "need an account_name"}
+    return contacts.account_contacts(account)
+
+
 TOOLS = {
     "get_hot_leads": tool_hot_leads,
     "search_company_background": tool_search_company_background,
+    "get_segment_diagnostic": tool_segment_diagnostic,
+    "get_account_contacts": tool_account_contacts,
     "get_bookings_by_fiscal_year": tool_bookings_fiscal,
     "get_bookings_monthly": tool_bookings_monthly,
     "get_pipeline_overview": tool_pipeline_overview,
@@ -436,6 +455,21 @@ TOOL_SCHEMA = [
             "company": {"type": "string", "description": "Company name to search for."},
         }, "required": ["company"]},
     }},
+    {"type": "function", "function": {
+        "name": "get_segment_diagnostic",
+        "description": "How a specific segment is performing vs. the company average - use for 'how are we doing in X' or 'how do we increase sales in X' questions. 'dimension' must be exactly one of: 'pipeline' (e.g. value='Datasurfr' - gives deal win rate + open deals by stage), 'industry' (e.g. value='BFSI' - gives lead conversion rate), or 'country' (e.g. value='India' - gives lead conversion rate). Industry/country diagnostics are about lead conversion, NOT deal revenue - deals in this CRM don't carry industry/country. Always check for a sample_size_warning before treating the result as reliable.",
+        "parameters": {"type": "object", "properties": {
+            "dimension": {"type": "string", "enum": ["pipeline", "industry", "country"]},
+            "value": {"type": "string", "description": "The specific segment name, e.g. 'Datasurfr', 'BFSI', 'India'."},
+        }, "required": ["dimension", "value"]},
+    }},
+    {"type": "function", "function": {
+        "name": "get_account_contacts",
+        "description": "Who to actually contact at a specific account/company - returns name and email (this CRM doesn't track role/title for contacts). Use for 'who should we contact at X' questions. Needs the exact account name as it appears in Zoho, not a fuzzy guess.",
+        "parameters": {"type": "object", "properties": {
+            "account_name": {"type": "string"},
+        }, "required": ["account_name"]},
+    }},
 ]
 
 
@@ -520,6 +554,25 @@ def _headline_weekly_kpis(data):
     return f"Week of {ws} to {we}: {leads:,} leads"
 
 
+def _headline_segment_diagnostic(data):
+    if data.get("error"):
+        return None
+    metric = "win rate" if data["dimension"] == "pipeline" else "conversion rate"
+    rate = data.get("win_rate", data.get("conversion_rate"))
+    company_rate = data.get("company_win_rate", data.get("company_conversion_rate"))
+    warning = " (small sample - treat as indicative)" if data.get("sample_size_warning") else ""
+    return (f"{data['value']}: {rate:.1%} {metric} vs {company_rate:.1%} company average "
+            f"({data['vs_company']}){warning}")
+
+
+def _headline_account_contacts(data):
+    if data.get("error") or not data.get("contacts"):
+        return None
+    c = data["contacts"][0]
+    more = f" (+{len(data['contacts']) - 1} more)" if len(data["contacts"]) > 1 else ""
+    return f"Contact at {data['account_name']}: {c['full_name']} ({c['email']}){more}"
+
+
 def _headline_hot_leads(data):
     top = (data.get("leads") or [None])[0]
     if not top:
@@ -538,6 +591,8 @@ HEADLINE_BUILDERS = {
     "get_lead_journey": _headline_lead_journey,
     "get_weekly_kpis": _headline_weekly_kpis,
     "get_hot_leads": _headline_hot_leads,
+    "get_segment_diagnostic": _headline_segment_diagnostic,
+    "get_account_contacts": _headline_account_contacts,
 }
 
 

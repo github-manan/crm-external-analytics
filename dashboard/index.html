@@ -50,7 +50,7 @@
         <h2>Bookings by fiscal year</h2>
         <span class="card-note">April&ndash;March &middot; won deals only</span>
       </div>
-      <canvas id="chart-fiscal" height="220"></canvas>
+      <canvas id="chart-fiscal" height="170"></canvas>
     </div>
 
     <div class="card">
@@ -58,7 +58,7 @@
         <h2>Pipeline mix</h2>
         <span class="card-note">Won vs. open value, all-time</span>
       </div>
-      <canvas id="chart-pipelines" height="220"></canvas>
+      <canvas id="chart-pipelines" height="170"></canvas>
     </div>
   </section>
 
@@ -71,7 +71,7 @@
       </div>
     </div>
     <p class="card-note">April and March alone make up a large share of all-time bookings &mdash; expect big swings at fiscal year boundaries, not a data error.</p>
-    <canvas id="chart-monthly" height="110"></canvas>
+    <canvas id="chart-monthly" height="90"></canvas>
   </section>
 
   <section class="card">
@@ -83,7 +83,7 @@
       </div>
     </div>
     <p class="card-note">Each pipeline has its own stage set &mdash; funnels are never blended across pipelines.</p>
-    <canvas id="chart-stages" height="220"></canvas>
+    <canvas id="chart-stages" height="170"></canvas>
   </section>
 
   <section class="grid-2">
@@ -92,7 +92,7 @@
         <h2>Seasonality</h2>
         <span class="card-note">Won revenue by calendar month, all years combined</span>
       </div>
-      <canvas id="chart-seasonality" height="220"></canvas>
+      <canvas id="chart-seasonality" height="170"></canvas>
     </div>
 
     <div class="card">
@@ -100,7 +100,7 @@
         <h2>Open pipeline over time</h2>
         <span class="card-note">From daily snapshots &mdash; history starts the day this dashboard went live</span>
       </div>
-      <canvas id="chart-history" height="220"></canvas>
+      <canvas id="chart-history" height="170"></canvas>
     </div>
   </section>
 
@@ -113,7 +113,7 @@
       </div>
     </div>
 
-    <div class="card-controls" style="margin-bottom: 0.8rem;">
+    <div class="card-controls" style="margin-bottom: 0.6rem; flex-wrap: wrap;">
       <label for="rep-filter">Individual</label>
       <select id="rep-filter"><option value="">All reps</option></select>
       <label for="granularity-filter">View by</label>
@@ -124,9 +124,14 @@
         <option value="quarterly">Quarterly</option>
         <option value="yearly">Yearly (fiscal year)</option>
       </select>
+      <label for="trend-start">From</label>
+      <input type="date" id="trend-start">
+      <label for="trend-end">To</label>
+      <input type="date" id="trend-end">
+      <button id="trend-range-clear" type="button" class="pill pill-muted" style="cursor:pointer;">Clear range</button>
     </div>
-    <p class="card-note">Won deals/revenue over time for the selected individual (or everyone) &mdash; "yearly" is the same April&ndash;March fiscal year used elsewhere on this page.</p>
-    <canvas id="chart-rep-trend" height="100"></canvas>
+    <p class="card-note">Won deals/revenue over time for the selected individual (or everyone) &mdash; "yearly" is the same April&ndash;March fiscal year used elsewhere on this page. Leave the date range blank for all-time.</p>
+    <canvas id="chart-rep-trend" height="85"></canvas>
 
     <div class="table-wrap" style="margin-top: 1.2rem;">
       <table id="reps-table">
@@ -171,6 +176,7 @@
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script src="auth.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

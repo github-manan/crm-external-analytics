@@ -103,17 +103,21 @@ async function loadKPIs(pipelines, fiscal, meta) {
   const currentFY = fiscal[fiscal.length - 1];
 
   setKPI(0, fmtCr(wonTotal), `${fmtInt(pipelines.reduce((s, p) => s + p.won, 0))} deals won, all-time`);
-  setKPI(1, fmtCr(currentFY.revenue_inr), `${currentFY.fiscal_year} · ${fmtInt(currentFY.deals_won)} deals so far`);
+  setKPI(1, fmtCr(currentFY?.revenue_inr), currentFY ? `${currentFY.fiscal_year} · ${fmtInt(currentFY.deals_won)} deals so far` : 'no won deals yet');
   setKPI(2, fmtCr(openTotal), 'across all 4 pipelines');
   setKPI(3, fmtInt(openDeals), 'currently open');
-  setKPI(4, fmtInt(meta.row_counts.v_leads), 'all-time, all statuses');
 
   try {
+    // Sourced from the journey endpoint, not meta.row_counts - that count
+    // is company-wide with no owner filter, which would leak everyone
+    // else's lead count into a non-admin's "my data" view.
     const journey = await getJSON('/api/weekly/journey?scope=all');
     const lead = journey.steps[0].count, action = journey.steps[3].count;
     const actionPct = lead ? (action / lead * 100).toFixed(1) : '0.0';
+    setKPI(4, fmtInt(lead), 'all-time, all statuses');
     setKPI(5, `${actionPct}%`, `${fmtInt(action)} of ${fmtInt(lead)} leads reached a deal · ${journey.overall_pct}% won`);
   } catch (e) {
+    setKPI(4, 'n/a', 'weekly dashboard API unavailable');
     setKPI(5, 'n/a', 'weekly dashboard API unavailable');
   }
 }
@@ -346,8 +350,11 @@ function renderHistoryChart(rows) {
 // ---------- individual performance trend ----------
 
 let repTrendChart;
-async function loadRepTrendChart(owner, granularity) {
-  const q = `?granularity=${encodeURIComponent(granularity)}` + (owner ? `&owner=${encodeURIComponent(owner)}` : '');
+async function loadRepTrendChart(owner, granularity, start, end) {
+  let q = `?granularity=${encodeURIComponent(granularity)}`;
+  if (owner) q += `&owner=${encodeURIComponent(owner)}`;
+  if (start) q += `&start=${encodeURIComponent(start)}`;
+  if (end) q += `&end=${encodeURIComponent(end)}`;
   const { rows } = await getJSON('/api/reps/timeseries' + q);
   const ctx = document.getElementById('chart-rep-trend');
   repTrendChart?.destroy();
@@ -479,6 +486,9 @@ function populateSelect(el, values, { withAll = true, allLabel = 'All', labelFn 
 }
 
 async function main() {
+  const session = await requireSession();
+  if (!session) return; // already redirected to login.html
+
   const meta = await initTopbar();
   if (!meta) return; // API down — nothing else will load either
 
@@ -518,14 +528,27 @@ async function main() {
   fyFilter.addEventListener('change', () => loadRepsTable(fyFilter.value));
   await loadRepsTable('');
 
-  // individual + granularity filter (rep trend chart)
+  // individual + granularity + date-range filter (rep trend chart)
   const { rows: repRows } = await getJSON('/api/reps');
   const repFilter = document.getElementById('rep-filter');
   const granularityFilter = document.getElementById('granularity-filter');
+  const startFilter = document.getElementById('trend-start');
+  const endFilter = document.getElementById('trend-end');
+  const clearRangeBtn = document.getElementById('trend-range-clear');
   populateSelect(repFilter, repRows.map(r => r.owner_name).sort(), { allLabel: 'All reps', labelFn: ownerLabel });
-  const refreshRepTrend = () => loadRepTrendChart(repFilter.value, granularityFilter.value);
+  if (!session.is_admin) {
+    // The server always scopes these endpoints to the logged-in user's own
+    // data regardless of what this dropdown says (see serve.py's
+    // scoped_owner()) - lock it to avoid implying a choice that isn't real.
+    repFilter.value = session.owner_name;
+    repFilter.disabled = true;
+  }
+  const refreshRepTrend = () => loadRepTrendChart(repFilter.value, granularityFilter.value, startFilter.value, endFilter.value);
   repFilter.addEventListener('change', refreshRepTrend);
   granularityFilter.addEventListener('change', refreshRepTrend);
+  startFilter.addEventListener('change', refreshRepTrend);
+  endFilter.addEventListener('change', refreshRepTrend);
+  clearRangeBtn.addEventListener('click', () => { startFilter.value = ''; endFilter.value = ''; refreshRepTrend(); });
   await refreshRepTrend();
 
   await loadDataQuality();

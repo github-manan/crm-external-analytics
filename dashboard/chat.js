@@ -2,6 +2,11 @@
 // turn talks only to a local Ollama model. No CRM data ever leaves this
 // machine. Read-only: this page cannot write anything to Zoho.
 
+// Redirects to login.html if not logged in; otherwise renders the
+// "logged in as / Logout" pill. Scoping itself happens server-side in
+// serve.py/chatbot.py, not here - this is just the page gate + UI.
+requireSession();
+
 const state = { history: [] };
 
 const SUGGESTIONS = [

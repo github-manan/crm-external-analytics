@@ -354,15 +354,22 @@ REP_TIMESERIES_BUCKETS = {
 }
 
 
-def rep_timeseries(owner=None, granularity="monthly"):
+def rep_timeseries(owner=None, granularity="monthly", start=None, end=None):
     """One rep's (or everyone's) won deals/revenue over time, bucketed at
-    the given granularity. Won deals only, closing_date IS NOT NULL - same
-    338 deals missing it are excluded here as everywhere else revenue is
-    reported (see /api/meta caveats)."""
+    the given granularity, optionally restricted to a closing_date range.
+    Won deals only, closing_date IS NOT NULL - same 338 deals missing it
+    are excluded here as everywhere else revenue is reported (see
+    /api/meta caveats)."""
     bucket = REP_TIMESERIES_BUCKETS.get(granularity)
     if bucket is None:
         raise ValueError(f"granularity must be one of {sorted(REP_TIMESERIES_BUCKETS)}")
     w, p = owner_clause(owner)
+    if start:
+        w += " AND closing_date >= ?"
+        p.append(start)
+    if end:
+        w += " AND closing_date <= ?"
+        p.append(end)
     return rows(f"""
         SELECT {bucket} AS period,
                COUNT(*) AS deals_won,

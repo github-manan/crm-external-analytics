@@ -335,9 +335,24 @@ async function loadAll() {
 }
 
 async function main() {
+  const session = await requireSession();
+  if (!session) return; // already redirected to login.html
+
   const ok = await initTopbar();
   if (!ok) return;
   await initOwnerFilter();
+
+  if (!session.is_admin) {
+    // The server always scopes every endpoint on this page to the
+    // logged-in user's own data regardless of this dropdown (see
+    // serve.py's scoped_owner()) - lock it to avoid implying a choice
+    // that isn't real.
+    const sel = document.getElementById('owner');
+    sel.value = session.owner_name;
+    sel.disabled = true;
+    state.owner = session.owner_name;
+  }
+
   await loadAll();
 }
 

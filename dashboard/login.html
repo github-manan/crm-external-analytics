@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MitKat Sales Analytics &mdash; Login</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="login-wrap">
+  <form id="login-form" class="card login-card">
+    <h1 style="margin:0 0 0.2rem;font-size:1.1rem;">MitKat Sales Analytics</h1>
+    <p class="card-note" style="margin-bottom:1rem;">Sign in to see your own CRM data.</p>
+
+    <label for="username" class="card-note">Username</label>
+    <input type="text" id="username" autocomplete="username" required>
+
+    <label for="password" class="card-note" style="margin-top:0.6rem;">Password</label>
+    <input type="password" id="password" autocomplete="current-password" required>
+
+    <button type="submit" id="login-submit" style="margin-top:1rem;">Sign in</button>
+    <div id="login-error" class="login-error" hidden></div>
+  </form>
+</div>
+
+<script src="login.js"></script>
+</body>
+</html>

@@ -58,6 +58,18 @@ Keep answers short and direct - this is a chat widget, not a report."""
 
 NULLISH = {"null", "none", "n/a", "na", "undefined", ""}
 
+# Enforced in ask() below, not just described in the system prompt - a
+# non-admin's tool calls get their owner forced to their own name no
+# matter what the model passes, same principle as serve.py's
+# scoped_owner(). Tools in ADMIN_ONLY_TOOLS have no owner concept at all
+# (they rank or list every rep by name), so a non-admin can't use them.
+OWNER_SCOPED_TOOLS = {
+    "get_deals_by_stage", "get_total_leads", "get_lead_status_breakdown",
+    "get_leads_by_source", "get_lead_journey", "get_revenue_target",
+    "get_weekly_kpis", "get_things_needing_attention", "get_hot_leads",
+}
+ADMIN_ONLY_TOOLS = {"get_rep_performance", "list_sales_reps"}
+
 
 def clean_args(args):
     """Small models frequently pass the literal string "null" (or similar)
@@ -639,9 +651,24 @@ def build_headline(tool_log):
         return None
 
 
-def ask(user_message, history=None, max_tool_rounds=4):
-    """Runs the tool-calling loop. Returns {reply, tool_calls: [...]} for transparency."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+def ask(user_message, history=None, max_tool_rounds=4, session=None):
+    """Runs the tool-calling loop. Returns {reply, tool_calls: [...]} for transparency.
+
+    session (from serve.py's auth.py) scopes every tool call to the asking
+    user's own data when they're not an admin - enforced below, not left to
+    the model to respect on its own. The system prompt note is purely for
+    the model's own wording (so it doesn't offer to look up someone else),
+    it is not what's actually keeping their data separated.
+    """
+    system_prompt = SYSTEM_PROMPT
+    if session and not session.get("is_admin"):
+        system_prompt += (
+            f"\n\n9. You are answering for {session.get('display_name')} only - every tool "
+            f"result you get back is already restricted to their own data ({session.get('owner_name')}). "
+            f"If asked about another rep by name, say you can only see their own data, not "
+            f"anyone else's."
+        )
+    messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history or [])
     messages.append({"role": "user", "content": user_message})
 
@@ -673,8 +700,16 @@ def ask(user_message, history=None, max_tool_rounds=4):
             if isinstance(args, str):
                 args = json.loads(args or "{}")
             args = clean_args(args)
-            fn = TOOLS.get(name)
-            result = fn(args) if fn else {"error": f"unknown tool '{name}'"}
+
+            is_non_admin = session and not session.get("is_admin")
+            if is_non_admin and name in ADMIN_ONLY_TOOLS:
+                result = {"error": "That ranks/lists every rep by name - only an admin can see "
+                                    "that. Ask about your own numbers instead, or ask your admin."}
+            else:
+                if is_non_admin and name in OWNER_SCOPED_TOOLS:
+                    args["owner"] = session.get("owner_name")
+                fn = TOOLS.get(name)
+                result = fn(args) if fn else {"error": f"unknown tool '{name}'"}
             clean_result = strip_raw_money(result)
             # Full verified data goes back with the response too, not just to
             # the model - the model's prose can mis-transcribe a number even

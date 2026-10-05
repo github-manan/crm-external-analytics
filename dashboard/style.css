@@ -20,8 +20,15 @@
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
+/* Dark mode applies automatically from the OS/browser setting (the media
+   query), UNLESS the user has explicitly picked one via the theme toggle
+   (theme.js sets data-theme="light"|"dark" on <html>, read before first
+   paint by an inline script in <head> - no flash of the wrong theme).
+   The two blocks below are deliberately duplicated rather than shared -
+   a media query and a plain attribute selector can't be combined into one
+   rule. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0b0f1a;
     --surface: #141b2d;
     --surface-2: #10162480;
@@ -38,6 +45,23 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 16px -4px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.55);
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0f1a;
+  --surface: #141b2d;
+  --surface-2: #10162480;
+  --border: #232c42;
+  --text: #e7ecf7;
+  --text-muted: #8b97b3;
+  --accent: #6d9bff;
+  --accent-2: #8fb0ff;
+  --accent-soft: #19233d;
+  --warn: #f6c453;
+  --warn-soft: #2b2411;
+  --good: #4ade80;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 16px -4px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.55);
 }
 
 * { box-sizing: border-box; }
@@ -112,6 +136,9 @@ a { color: var(--accent); }
 .pill-good { background: var(--accent-soft); color: var(--good); }
 .pill-warn { background: var(--warn-soft); color: var(--warn); cursor: pointer; }
 .pill-warn:hover { filter: brightness(0.96); transform: translateY(-1px); }
+
+#theme-toggle { border: none; font: inherit; cursor: pointer; }
+#theme-toggle:hover { filter: brightness(0.96); transform: translateY(-1px); }
 
 #scope-toggle button.pill { border: none; font: inherit; cursor: pointer; }
 #scope-toggle button.pill:hover { filter: brightness(0.96); transform: translateY(-1px); }

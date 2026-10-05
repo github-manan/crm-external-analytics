@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CRM Assistant</title>
+<script>try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="chat.css">
 </head>
@@ -44,6 +45,7 @@
   Data via the local read-only API on <code>localhost:8420</code> &middot; model via <code>localhost:11434</code> (Ollama) &middot; never writes to Zoho.
 </footer>
 
+<script src="theme.js"></script>
 <script src="auth.js"></script>
 <script src="chat.js"></script>
 </body>

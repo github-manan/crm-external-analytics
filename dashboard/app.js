@@ -4,7 +4,10 @@
 const API = '';
 
 const PALETTE = ['#1d4ed8', '#0891b2', '#d97706', '#7c3aed', '#dc2626', '#059669'];
-const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+// resolvedTheme() (theme.js) respects an explicit toggle choice, falling
+// back to the OS preference - not just raw matchMedia, which would ignore
+// the toggle entirely.
+const dark = resolvedTheme() === 'dark';
 const GRID_COLOR = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 const TICK_COLOR = dark ? '#94a0b8' : '#64748b';
 
@@ -12,6 +15,15 @@ Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Rob
 Chart.defaults.font.size = 12;
 Chart.defaults.color = TICK_COLOR;
 Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
+Chart.defaults.plugins.tooltip.titleColor = '#fff';
+Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.cornerRadius = 8;
+Chart.defaults.plugins.tooltip.displayColors = false;
+Chart.defaults.elements.line.borderWidth = 2.5;
+Chart.defaults.elements.bar.borderRadius = 6;
+Chart.defaults.elements.bar.borderSkipped = false;
 
 function fmtCr(inr) {
   if (inr === null || inr === undefined) return '—';
@@ -145,7 +157,6 @@ function renderFiscalChart(rows) {
         label: 'Revenue (Cr)',
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
         backgroundColor: PALETTE[0],
-        borderRadius: 4,
       }],
     },
     options: {
@@ -179,8 +190,8 @@ function renderPipelinesChart(rows) {
     data: {
       labels: rows.map(r => r.pipeline),
       datasets: [
-        { label: 'Won', data: rows.map(r => +(r.won_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[0], borderRadius: 4 },
-        { label: 'Open', data: rows.map(r => +(r.open_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[2], borderRadius: 4 },
+        { label: 'Won', data: rows.map(r => +(r.won_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[0] },
+        { label: 'Open', data: rows.map(r => +(r.open_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[2] },
       ],
     },
     options: {
@@ -253,7 +264,6 @@ async function loadStagesChart(pipeline, allRows) {
         label: 'Open value (Cr)',
         data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)),
         backgroundColor: PALETTE[1],
-        borderRadius: 4,
       }],
     },
     options: {
@@ -290,7 +300,6 @@ function renderSeasonalityChart(rows) {
       datasets: [{
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
         backgroundColor: rows.map(r => (r.month === 4 || r.month === 3) ? PALETTE[2] : PALETTE[0]),
-        borderRadius: 4,
       }],
     },
     options: {

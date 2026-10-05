@@ -4,13 +4,25 @@
 
 const PALETTE = ['#1d4ed8', '#0891b2', '#d97706', '#7c3aed', '#dc2626', '#059669',
                  '#be185d', '#65a30d', '#0284c7', '#ca8a04', '#9333ea', '#0d9488'];
-const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+// resolvedTheme() (theme.js) respects an explicit toggle choice, falling
+// back to the OS preference - not just raw matchMedia, which would ignore
+// the toggle entirely.
+const dark = resolvedTheme() === 'dark';
 const GRID_COLOR = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 const TICK_COLOR = dark ? '#94a0b8' : '#64748b';
 
 Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 Chart.defaults.font.size = 12;
 Chart.defaults.color = TICK_COLOR;
+Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
+Chart.defaults.plugins.tooltip.titleColor = '#fff';
+Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.cornerRadius = 8;
+Chart.defaults.plugins.tooltip.displayColors = false;
+Chart.defaults.elements.line.borderWidth = 2.5;
+Chart.defaults.elements.bar.borderRadius = 6;
+Chart.defaults.elements.bar.borderSkipped = false;
 
 const state = { owner: '' };
 
@@ -168,7 +180,7 @@ function renderStages(rows, pipeline) {
     type: 'bar',
     data: {
       labels: filtered.map(r => r.stage),
-      datasets: [{ label: 'Deals', data: filtered.map(r => r.deal_count), backgroundColor: PALETTE[2], borderRadius: 4 }],
+      datasets: [{ label: 'Deals', data: filtered.map(r => r.deal_count), backgroundColor: PALETTE[2] }],
     },
     options: {
       plugins: {
@@ -228,7 +240,7 @@ async function loadLeadStatus() {
     type: 'bar',
     data: {
       labels: rows.map(r => r.status),
-      datasets: [{ label: 'Leads', data: rows.map(r => r.n), backgroundColor: PALETTE[5], borderRadius: 4 }],
+      datasets: [{ label: 'Leads', data: rows.map(r => r.n), backgroundColor: PALETTE[5] }],
     },
     options: {
       indexAxis: 'y',

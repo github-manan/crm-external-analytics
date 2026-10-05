@@ -31,6 +31,7 @@ import leads
 import segments
 import contacts
 import data_quality
+import adoption
 from ddgs import DDGS
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -68,7 +69,7 @@ OWNER_SCOPED_TOOLS = {
     "get_leads_by_source", "get_lead_journey", "get_revenue_target",
     "get_weekly_kpis", "get_things_needing_attention", "get_hot_leads",
 }
-ADMIN_ONLY_TOOLS = {"get_rep_performance", "list_sales_reps"}
+ADMIN_ONLY_TOOLS = {"get_rep_performance", "list_sales_reps", "get_user_activity"}
 
 
 def clean_args(args):
@@ -340,12 +341,26 @@ def tool_data_quality(_args):
     return data_quality.current()
 
 
+def tool_user_activity(args):
+    status = (args.get("status") or "").strip().lower() or None
+    all_users = adoption.user_activity()
+    users = [u for u in all_users if u["status"] == status] if status else all_users
+    return {
+        "note": ("Based on real record activity (deal stage changes + logged calls/tasks/events), "
+                  "not CRM logins - Zoho's API has no login history at all."),
+        "active_within_days": adoption.ACTIVE_WITHIN_DAYS,
+        "total_crm_users": len(all_users),
+        "users": users,
+    }
+
+
 TOOLS = {
     "get_hot_leads": tool_hot_leads,
     "search_company_background": tool_search_company_background,
     "get_segment_diagnostic": tool_segment_diagnostic,
     "get_account_contacts": tool_account_contacts,
     "get_data_quality_progress": tool_data_quality,
+    "get_user_activity": tool_user_activity,
     "get_bookings_by_fiscal_year": tool_bookings_fiscal,
     "get_bookings_monthly": tool_bookings_monthly,
     "get_pipeline_overview": tool_pipeline_overview,
@@ -377,7 +392,7 @@ TOOL_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "get_pipeline_overview",
-        "description": "Totals per pipeline (Consulting/Datasurfr/MSS/Renewal): deal count, won count+value, open count+value. Includes highest_open_value_pipeline and highest_won_value_pipeline, already picked out - use those directly for 'which pipeline has the most X' questions, don't compare the pipelines list yourself.",
+        "description": "Totals for ALL 4 pipelines side by side (Consulting/Datasurfr/MSS/Renewal): deal count, won count+value, open count+value. Includes highest_open_value_pipeline and highest_won_value_pipeline, already picked out - use those directly for 'which pipeline has the most X' questions, don't compare the pipelines list yourself. For 'how is [one specific pipeline] performing/doing' - a single named pipeline, not a comparison across all of them - use get_segment_diagnostic(dimension='pipeline') instead, which gives that pipeline's win rate vs. the company average rather than just raw counts.",
         "parameters": {"type": "object", "properties": {}},
     }},
     {"type": "function", "function": {
@@ -418,7 +433,7 @@ TOOL_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "get_lead_journey",
-        "description": "The funnel: Lead -> Contacted -> Converted -> Action (has a deal) -> Won, with conversion % at each step. This is THE way to answer any lead-conversion-rate question.",
+        "description": "The funnel: Lead -> Contacted -> Converted -> Action (has a deal) -> Won, with conversion % at each step. This is THE way to answer the OVERALL/company-wide lead-to-deal or lead-to-won conversion rate question ('what's our conversion rate', 'what % of leads convert') when no specific country/industry/pipeline is named. If a specific one IS named (conversion in BFSI, in India, in Datasurfr), use get_segment_diagnostic instead - never invent a fake segment value just because the word 'conversion' appears.",
         "parameters": {"type": "object", "properties": {
             "scope": {"type": "string", "enum": ["all", "week"], "description": "'all' = the standing funnel (default, more meaningful), 'week' = only leads created this week."},
             "owner": {"type": "string"},
@@ -476,7 +491,7 @@ TOOL_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "get_segment_diagnostic",
-        "description": "How a specific segment is performing vs. the company average - use for ANY 'how are we doing in X' / 'how do we increase sales in X' / 'leads in X' / 'conversion in X' question, for ANY X, including a country or region name. Pick dimension by what kind of thing X is: a COUNTRY OR PLACE NAME (India, US, USA, UK, Singapore, Qatar, Mumbai, Middle East, APAC, any nation/region/city) -> dimension='country'; an INDUSTRY/VERTICAL (BFSI, Technology, Manufacturing, Healthcare) -> dimension='industry'; one of our 4 named pipelines (Consulting, Datasurfr, MSS, Renewal) -> dimension='pipeline'. If X is a place name, ALWAYS use 'country', never 'industry' - this has been picked wrong before. Pipeline gives deal win rate; industry/country give lead conversion rate, NOT deal revenue (deals here don't carry industry/country). Always check for a sample_size_warning before treating the result as reliable.",
+        "description": "How a specific, actually-named segment is performing vs. the company average - use for 'how are we doing in X' / 'how do we increase sales in X' / 'leads in X' / 'conversion in X' questions, where X is a REAL country, industry, or one of the 4 pipelines someone actually named in the question (e.g. 'conversion in BFSI', 'leads in India', 'how's Datasurfr doing'). Requires a genuine X - do NOT call this and invent a placeholder value when no specific segment was named (e.g. a plain 'what's our conversion rate' with no country/industry/pipeline mentioned is get_lead_journey, not this - you have fabricated a fake segment value here before when no real one existed). Pick dimension by what kind of thing X is: a COUNTRY OR PLACE NAME (India, US, USA, UK, Singapore, Qatar, Mumbai, Middle East, APAC, any nation/region/city) -> dimension='country'; an INDUSTRY/VERTICAL (BFSI, Technology, Manufacturing, Healthcare) -> dimension='industry'; one of our 4 named pipelines (Consulting, Datasurfr, MSS, Renewal) -> dimension='pipeline'. If X is a place name, ALWAYS use 'country', never 'industry' - this has been picked wrong before. Pipeline gives deal win rate; industry/country give lead conversion rate, NOT deal revenue (deals here don't carry industry/country). Always check for a sample_size_warning before treating the result as reliable.",
         "parameters": {"type": "object", "properties": {
             "dimension": {"type": "string", "enum": ["pipeline", "industry", "country"]},
             "value": {"type": "string", "description": "The specific segment name, e.g. 'Datasurfr', 'BFSI', 'India', 'United States'."},
@@ -493,6 +508,13 @@ TOOL_SCHEMA = [
         "name": "get_data_quality_progress",
         "description": "How complete the CRM's own data entry is right now, and whether that's improved since this started being tracked - activity logging on open deals, real loss reasons on Closed Lost deals, closing dates on open deals, and subscription end dates on Renewal-pipeline deals. Use for 'is the data getting better / is the team filling things in' questions - NOT a sales metric, this is about data entry completeness.",
         "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "get_user_activity",
+        "description": "Who is actually using the CRM, based on real record activity (deal stage changes, logged calls/tasks/events) - NOT CRM logins, Zoho's API exposes no login history at all. Lists every CRM user by name with a status of active/inactive/no_activity. Use for 'who's using/not using the CRM', 'is anyone inactive', 'which users haven't touched anything' questions. Admin only - never call this for a non-admin session.",
+        "parameters": {"type": "object", "properties": {
+            "status": {"type": "string", "enum": ["active", "inactive", "no_activity"], "description": "Filter to just this status. Omit to list everyone."},
+        }},
     }},
 ]
 
@@ -615,6 +637,17 @@ def _headline_data_quality(data):
     return base + " (tracking just started - no trend yet)" if data.get("note") else base
 
 
+def _headline_user_activity(data):
+    users = data.get("users")
+    total = data.get("total_crm_users")
+    if not users or not total:
+        return None
+    active = sum(1 for u in users if u["status"] == "active")
+    inactive = sum(1 for u in users if u["status"] == "inactive")
+    no_activity = sum(1 for u in users if u["status"] == "no_activity")
+    return f"{active} active, {inactive} inactive, {no_activity} with no activity on record (of {total} CRM users total)"
+
+
 HEADLINE_BUILDERS = {
     "get_rep_performance": _headline_rep_performance,
     "get_pipeline_overview": _headline_pipeline_overview,
@@ -629,6 +662,7 @@ HEADLINE_BUILDERS = {
     "get_segment_diagnostic": _headline_segment_diagnostic,
     "get_account_contacts": _headline_account_contacts,
     "get_data_quality_progress": _headline_data_quality,
+    "get_user_activity": _headline_user_activity,
 }
 
 
@@ -673,7 +707,7 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None):
     messages.append({"role": "user", "content": user_message})
 
     tool_log = []
-    for _ in range(max_tool_rounds):
+    for round_num in range(max_tool_rounds):
         try:
             data = _post({
                 "model": MODEL, "messages": messages, "tools": TOOL_SCHEMA, "stream": False,
@@ -690,7 +724,30 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None):
         msg = data.get("message", {})
         calls = msg.get("tool_calls") or []
         if not calls:
-            return {"reply": msg.get("content", "").strip(), "tool_calls": tool_log,
+            content = (msg.get("content") or "").strip()
+            # Occasionally the model emits a botched tool-call attempt as
+            # plain text instead of a real tool_calls entry - e.g.
+            # '{"name": "get_data_quality_progress", "parameters": {"}'
+            # (truncated, unparseable JSON), most often for a tool that
+            # takes no arguments. Confirmed this is a real, reproducible
+            # failure mode (not a one-off) by re-running the same question
+            # several times. Retrying once gets a clean tool call or a
+            # real answer instead of relaying the raw JSON fragment to
+            # the user as if it were prose.
+            looks_like_botched_tool_call = content.startswith("{") and '"name"' in content
+            if looks_like_botched_tool_call and round_num < max_tool_rounds - 1:
+                # Resending the identical prompt reliably reproduces the
+                # identical broken output at this temperature - confirmed
+                # empirically, not a guess. The retry has to actually
+                # change the input to have a chance of a different result.
+                messages.append({
+                    "role": "user",
+                    "content": ("That wasn't a valid tool call - it looked like raw JSON text instead "
+                                 "of actually using the tool-calling mechanism. Please call the tool "
+                                 "directly this time."),
+                })
+                continue
+            return {"reply": content, "tool_calls": tool_log,
                     "headline": build_headline(tool_log)}
 
         messages.append(msg)

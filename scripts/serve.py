@@ -40,6 +40,7 @@ import contacts
 import data_quality
 import chatbot
 import auth
+import adoption
 
 # Holds the current request's session per-thread (ThreadingHTTPServer gives
 # each request its own thread) so endpoint functions can read "who's asking"
@@ -398,8 +399,13 @@ def ep_auth_me(_query):
     return {k: v for k, v in session.items() if k != "expires_at"}
 
 
+def ep_user_activity(_query):
+    return {"rows": adoption.user_activity(), "active_within_days": adoption.ACTIVE_WITHIN_DAYS}
+
+
 ROUTES = {
     "/api/auth/me": ep_auth_me,
+    "/api/users/activity": ep_user_activity,
     "/api/leads/hot": ep_leads_hot,
     "/api/segments/diagnostic": ep_segment_diagnostic,
     "/api/contacts/account": ep_account_contacts,
@@ -454,7 +460,7 @@ POST_ROUTES = {
 # all - fine when only one trusted person ever used this tool, a real gap
 # now that different reps have their own logins. Locked to admin only.
 ADMIN_ONLY_PREFIXES = ("/api/view/",)
-ADMIN_ONLY_ROUTES = {"/api/query"}
+ADMIN_ONLY_ROUTES = {"/api/query", "/api/users/activity"}
 
 # Rendered without a session - everything else requires one.
 PUBLIC_PAGES = {"/login.html"}

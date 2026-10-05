@@ -445,6 +445,35 @@ async function loadRepsTable(fiscalYear) {
     `).join('');
 }
 
+// ---------- CRM user activity (admin only) ----------
+
+const STATUS_LABEL = { active: 'Active', inactive: 'Inactive', no_activity: 'No activity on record' };
+
+async function loadUserActivity(filterStatus) {
+  const tbody = document.querySelector('#activity-table tbody');
+  try {
+    const { rows, active_within_days } = await getJSON('/api/users/activity');
+    document.getElementById('activity-window').textContent = active_within_days;
+    const filtered = filterStatus ? rows.filter(r => r.status === filterStatus) : rows;
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No users match this filter.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = filtered.map(r => `
+      <tr>
+        <td>${r.full_name}</td>
+        <td>${r.role ?? '—'}</td>
+        <td class="num">${fmtInt(r.deal_stage_changes)}</td>
+        <td class="num">${fmtInt(r.logged_activities)}</td>
+        <td>${r.last_activity ? `${r.last_activity.slice(0, 10)} (${r.days_since_last_activity}d ago)` : 'never'}</td>
+        <td><span class="status-pill status-${r.status}">${STATUS_LABEL[r.status]}</span></td>
+      </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Failed to load</td></tr>';
+    console.error(e);
+  }
+}
+
 // ---------- data quality ----------
 
 async function loadDataQuality() {
@@ -581,6 +610,15 @@ async function main() {
   endFilter.addEventListener('change', refreshRepTrend);
   clearRangeBtn.addEventListener('click', () => { startFilter.value = ''; endFilter.value = ''; refreshRepTrend(); });
   await refreshRepTrend();
+
+  if (session.is_admin) {
+    // Admin only - the endpoint itself 403s for a non-admin too (same
+    // privacy class as the rep-comparison table: names every individual).
+    document.getElementById('activity-card').hidden = false;
+    const activityFilter = document.getElementById('activity-filter');
+    activityFilter.addEventListener('change', () => loadUserActivity(activityFilter.value));
+    await loadUserActivity('');
+  }
 
   await loadDataQuality();
 }

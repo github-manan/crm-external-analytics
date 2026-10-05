@@ -156,6 +156,37 @@
     </div>
   </section>
 
+  <section class="card" id="activity-card" hidden>
+    <div class="card-head">
+      <h2>CRM User Activity</h2>
+      <div class="card-controls">
+        <label for="activity-filter">Show</label>
+        <select id="activity-filter">
+          <option value="">All users</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="no_activity">No activity on record</option>
+        </select>
+      </div>
+    </div>
+    <p class="card-note">Based on real record activity (deal stage changes + logged calls/tasks/events), not CRM logins &mdash; Zoho's API gives us no login history at all. "Active" = activity in the last <span id="activity-window">30</span> days.</p>
+    <div class="table-wrap">
+      <table id="activity-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th class="num">Deal stage changes</th>
+            <th class="num">Logged activities</th>
+            <th>Last activity</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" class="loading-row">loading&hellip;</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="card">
     <div class="card-head">
       <h2>Data quality</h2>

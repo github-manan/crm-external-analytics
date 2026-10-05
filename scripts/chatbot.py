@@ -32,6 +32,7 @@ import segments
 import contacts
 import data_quality
 import adoption
+import insights
 from ddgs import DDGS
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -53,6 +54,7 @@ Hard rules:
 6. Money is in Indian Rupees. Every "*_inr" field comes with a "*_inr_fmt" sibling (e.g. revenue_inr_fmt: "₹80.78 Cr") - always quote that pre-formatted string exactly as given. Do not convert the raw rupee number yourself; you have gotten that arithmetic wrong before.
 7. When useful, briefly name which figure/tool your answer is based on, so it's checkable.
 8. get_data_quality_progress's each metric has a "trend" field - if it says "NO TREND YET", say plainly that tracking just started and there's nothing to compare yet. Never say a number is "up", "improving", or "increasing" unless that metric's own "trend" field says "improved" - you have invented "up from previous periods" out of nothing before.
+8b. get_insights flags a segment whose rate statistically diverges from the company average - it does NOT say why. Never invent a cause or reason (e.g. never say "Renewal is underperforming because of X") - you have no data on why, only that it diverges. Frame every finding as "worth a look", never as a conclusion, a prediction, or a root cause. Each finding has pre-formatted "rate_pct"/"company_rate_pct" strings (e.g. "10.0%") - quote those exactly, do not restate "rate"/"company_rate" as a raw decimal (0.1 is not "0.1%").
 
 Keep answers short and direct - this is a chat widget, not a report."""
 
@@ -341,6 +343,17 @@ def tool_data_quality(_args):
     return data_quality.current()
 
 
+def tool_insights(_args):
+    findings = insights.scan()
+    return {
+        "note": (f"Segments whose rate diverges {insights.DIVERGENCE_POINTS}+ percentage points from "
+                  "the company average - a prompt to look closer, not a verdict. Small-sample segments "
+                  "are already excluded, same threshold segment_diagnostic uses."),
+        "divergence_threshold_points": insights.DIVERGENCE_POINTS,
+        "findings": findings,
+    }
+
+
 def tool_user_activity(args):
     status = (args.get("status") or "").strip().lower() or None
     all_users = adoption.user_activity()
@@ -361,6 +374,7 @@ TOOLS = {
     "get_account_contacts": tool_account_contacts,
     "get_data_quality_progress": tool_data_quality,
     "get_user_activity": tool_user_activity,
+    "get_insights": tool_insights,
     "get_bookings_by_fiscal_year": tool_bookings_fiscal,
     "get_bookings_monthly": tool_bookings_monthly,
     "get_pipeline_overview": tool_pipeline_overview,
@@ -516,6 +530,11 @@ TOOL_SCHEMA = [
             "status": {"type": "string", "enum": ["active", "inactive", "no_activity"], "description": "Filter to just this status. Omit to list everyone."},
         }},
     }},
+    {"type": "function", "function": {
+        "name": "get_insights",
+        "description": "Scans every pipeline, and the biggest industries/countries, for ones whose win/conversion rate diverges notably from the company average - surfaces what's worth a look WITHOUT already knowing which segment to ask about. Use for open-ended questions like 'what stands out right now', 'any notable trends', 'what should I look into', 'give me some insights'. This is a prompt to look closer, not a prediction or a verdict - small-sample segments are already excluded.",
+        "parameters": {"type": "object", "properties": {}},
+    }},
 ]
 
 
@@ -648,6 +667,18 @@ def _headline_user_activity(data):
     return f"{active} active, {inactive} inactive, {no_activity} with no activity on record (of {total} CRM users total)"
 
 
+def _headline_insights(data):
+    findings = data.get("findings")
+    if findings is None:
+        return None
+    if not findings:
+        return f"Nothing diverges {data.get('divergence_threshold_points', 10)}+ points from the company average right now."
+    top = findings[0]
+    more = f" (+{len(findings) - 1} more)" if len(findings) > 1 else ""
+    return (f"{top['value']}: {top['rate_pct']} {top['metric']} ({top['direction']} company average "
+            f"by {abs(top['diff_points'])}pts){more}")
+
+
 HEADLINE_BUILDERS = {
     "get_rep_performance": _headline_rep_performance,
     "get_pipeline_overview": _headline_pipeline_overview,
@@ -663,6 +694,7 @@ HEADLINE_BUILDERS = {
     "get_account_contacts": _headline_account_contacts,
     "get_data_quality_progress": _headline_data_quality,
     "get_user_activity": _headline_user_activity,
+    "get_insights": _headline_insights,
 }
 
 

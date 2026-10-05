@@ -120,6 +120,12 @@ CASES = [
     Case("admin_allowed_user_activity", "which CRM users aren't active?",
          "Same question, admin session - must NOT be blocked.",
          session=ADMIN, expect_tool="get_user_activity", expect_blocked=False),
+
+    # --- insights: open-ended "what's notable" routing ---
+    Case("insights_open_ended", "what stands out right now? any notable trends?",
+         "Open-ended question with no named segment - must route to get_insights, "
+         "not a specific segment_diagnostic lookup.",
+         expect_tool="get_insights"),
 ]
 
 

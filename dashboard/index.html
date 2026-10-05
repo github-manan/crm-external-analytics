@@ -35,6 +35,13 @@
 
 <main id="app">
 
+  <div id="scope-toggle" class="card-controls" hidden style="margin-bottom:-0.4rem;">
+    <label>Showing, below and in the charts</label>
+    <button type="button" id="scope-mine" class="pill pill-good" data-scope="mine">My data</button>
+    <button type="button" id="scope-company" class="pill pill-muted" data-scope="company">Company-wide</button>
+    <span class="card-note">(the Rep performance table always stays your own row only)</span>
+  </div>
+
   <section class="kpi-row" id="kpi-row" aria-label="Key metrics">
     <div class="kpi-card skeleton"><span class="kpi-label">All-time won revenue</span><span class="kpi-value">&mdash;</span></div>
     <div class="kpi-card skeleton"><span class="kpi-label">Current FY revenue</span><span class="kpi-value">&mdash;</span></div>

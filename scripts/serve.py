@@ -57,9 +57,30 @@ def scoped_owner(query):
     case their own owner_name always wins, regardless of what the request
     asked for. This is the real enforcement of "a rep only ever sees their
     own data" - it happens here in Python, not by trusting the frontend or
-    the chatbot's tool-call arguments to behave."""
+    the chatbot's tool-call arguments to behave. Use this for anything that
+    names or breaks down individuals (rep comparisons, weekly/IST views) -
+    there's no opting out of this one.
+    """
     session = current_session()
     if session and not session.get("is_admin"):
+        return session["owner_name"]
+    return query.get("owner", [None])[0]
+
+
+def scoped_owner_optional(query):
+    """Same default as scoped_owner (a non-admin sees their own data), but
+    a non-admin can explicitly ask for the company-wide figure with
+    ?view=company (named "view", not "scope" - ep_weekly_journey already
+    uses "scope" for all-time-vs-this-week, a completely different thing -
+    don't collide with it). Only for endpoints that aggregate across
+    everyone without naming any individual (bookings, pipeline mix,
+    seasonality) - seeing the company total isn't seeing "someone else's
+    data" the way a named rep-comparison table would be, so this one's a
+    view preference, not a privacy boundary."""
+    session = current_session()
+    if session and not session.get("is_admin"):
+        if query.get("view", [None])[0] == "company":
+            return None
         return session["owner_name"]
     return query.get("owner", [None])[0]
 
@@ -145,7 +166,7 @@ def ep_bookings_fiscal(query):
     # v_bookings_fiscal is pre-aggregated and carries no owner_name, so a
     # scoped request re-aggregates straight from v_deals instead of using
     # the view - same grouping, with the owner filter the view can't do.
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     if not owner:
         return {"rows": rows("SELECT * FROM v_bookings_fiscal ORDER BY fiscal_year")}
     return {"rows": rows(
@@ -157,7 +178,7 @@ def ep_bookings_fiscal(query):
 
 def ep_bookings_monthly(query):
     pipeline = query.get("pipeline", [None])[0]
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     if not owner:
         if pipeline:
             return {"rows": rows(
@@ -182,7 +203,7 @@ def ep_bookings_monthly(query):
 
 
 def ep_pipeline_open(query):
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     if not owner:
         return {"rows": rows("SELECT * FROM v_open_pipeline ORDER BY pipeline, stage_order")}
     return {"rows": rows(
@@ -194,7 +215,7 @@ def ep_pipeline_open(query):
 
 
 def ep_pipeline_history(query):
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     clause, params = ("", ()) if not owner else (" WHERE owner_name = ?", (owner,))
     return {"rows": rows(
         f"""SELECT snapshot_date,
@@ -242,7 +263,7 @@ def ep_rep_timeseries(query):
 
 
 def ep_seasonality(query):
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     clause, params = ("", ()) if not owner else (" AND owner_name = ?", (owner,))
     return {"note": "Share of all-time won revenue by calendar month.", "rows": rows(
         f"""SELECT CAST(strftime('%m', closing_date) AS INTEGER) AS month,
@@ -254,7 +275,7 @@ def ep_seasonality(query):
 
 
 def ep_pipelines(query):
-    owner = scoped_owner(query)
+    owner = scoped_owner_optional(query)
     clause, params = ("", ()) if not owner else (" AND owner_name = ?", (owner,))
     return {"rows": rows(
         f"""SELECT pipeline,
@@ -297,7 +318,11 @@ def ep_weekly_summary(query):
 
 
 def ep_weekly_journey(query):
-    week, owner = _wk(query)
+    # Doesn't name any individual (just funnel counts), so - unlike the
+    # other weekly/* endpoints - this one honors the company-wide toggle
+    # too (the Overall page's Total Leads / conversion KPI tiles use it).
+    week = query.get("week", [None])[0]
+    owner = scoped_owner_optional(query)
     return weekly.journey(week, owner, query.get("scope", ["all"])[0])
 
 

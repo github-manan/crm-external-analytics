@@ -96,6 +96,15 @@ function setKPI(index, value, sub) {
   }
 }
 
+// 'mine' (default for non-admins) or 'company' - toggled by #scope-toggle,
+// only ever meaningful for a non-admin (admins already see company-wide by
+// default and have the Individual dropdown below for one-rep drill-down).
+let viewMode = 'mine';
+function withView(path) {
+  if (viewMode !== 'company') return path;
+  return path + (path.includes('?') ? '&' : '?') + 'view=company';
+}
+
 async function loadKPIs(pipelines, fiscal, meta) {
   const wonTotal = pipelines.reduce((s, p) => s + p.won_inr, 0);
   const openTotal = pipelines.reduce((s, p) => s + p.open_inr, 0);
@@ -111,7 +120,7 @@ async function loadKPIs(pipelines, fiscal, meta) {
     // Sourced from the journey endpoint, not meta.row_counts - that count
     // is company-wide with no owner filter, which would leak everyone
     // else's lead count into a non-admin's "my data" view.
-    const journey = await getJSON('/api/weekly/journey?scope=all');
+    const journey = await getJSON(withView('/api/weekly/journey?scope=all'));
     const lead = journey.steps[0].count, action = journey.steps[3].count;
     const actionPct = lead ? (action / lead * 100).toFixed(1) : '0.0';
     setKPI(4, fmtInt(lead), 'all-time, all statuses');
@@ -189,7 +198,7 @@ function renderPipelinesChart(rows) {
 let monthlyChart;
 async function loadMonthlyChart(pipeline) {
   const q = pipeline ? `?pipeline=${encodeURIComponent(pipeline)}` : '';
-  const { rows } = await getJSON('/api/bookings/monthly' + q);
+  const { rows } = await getJSON(withView('/api/bookings/monthly' + q));
   const ctx = document.getElementById('chart-monthly');
   monthlyChart?.destroy();
   monthlyChart = new Chart(ctx, {
@@ -485,20 +494,14 @@ function populateSelect(el, values, { withAll = true, allLabel = 'All', labelFn 
   el.innerHTML = opts.join('');
 }
 
-async function main() {
-  const session = await requireSession();
-  if (!session) return; // already redirected to login.html
-
-  const meta = await initTopbar();
-  if (!meta) return; // API down — nothing else will load either
-
+async function loadOverviewData(meta) {
   const [{ rows: fiscalRows }, { rows: pipelineRows }, { rows: openStageRows }, { rows: seasonalityRows }, { rows: historyRows }] =
     await Promise.all([
-      getJSON('/api/bookings/fiscal'),
-      getJSON('/api/pipelines'),
-      getJSON('/api/pipeline/open'),
-      getJSON('/api/seasonality'),
-      getJSON('/api/pipeline/history'),
+      getJSON(withView('/api/bookings/fiscal')),
+      getJSON(withView('/api/pipelines')),
+      getJSON(withView('/api/pipeline/open')),
+      getJSON(withView('/api/seasonality')),
+      getJSON(withView('/api/pipeline/history')),
     ]);
 
   loadKPIs(pipelineRows, fiscalRows, meta);
@@ -507,11 +510,13 @@ async function main() {
   renderSeasonalityChart(seasonalityRows);
   renderHistoryChart(historyRows);
 
-  // pipeline filter (monthly trend)
+  // pipeline filter (monthly trend) - .onchange (not addEventListener) so
+  // re-running this on a view-mode toggle replaces the handler instead of
+  // stacking a second one.
   const pipelineNames = pipelineRows.map(p => p.pipeline).sort();
   const pipelineFilter = document.getElementById('pipeline-filter');
   populateSelect(pipelineFilter, pipelineNames, { allLabel: 'All pipelines' });
-  pipelineFilter.addEventListener('change', () => loadMonthlyChart(pipelineFilter.value));
+  pipelineFilter.onchange = () => loadMonthlyChart(pipelineFilter.value);
   await loadMonthlyChart('');
 
   // pipeline filter (stage funnel) — defaults to the largest pipeline by deal count
@@ -519,8 +524,34 @@ async function main() {
   populateSelect(stageFilter, pipelineNames, { withAll: false });
   const defaultPipeline = [...pipelineRows].sort((a, b) => b.deals - a.deals)[0]?.pipeline;
   stageFilter.value = defaultPipeline;
-  stageFilter.addEventListener('change', () => loadStagesChart(stageFilter.value, openStageRows));
+  stageFilter.onchange = () => loadStagesChart(stageFilter.value, openStageRows);
   await loadStagesChart(defaultPipeline, openStageRows);
+
+  return fiscalRows;
+}
+
+async function main() {
+  const session = await requireSession();
+  if (!session) return; // already redirected to login.html
+
+  const meta = await initTopbar();
+  if (!meta) return; // API down — nothing else will load either
+
+  if (!session.is_admin) {
+    const toggle = document.getElementById('scope-toggle');
+    toggle.hidden = false;
+    toggle.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (btn.dataset.scope === viewMode) return;
+        viewMode = btn.dataset.scope;
+        toggle.querySelectorAll('button').forEach(b => b.classList.toggle('pill-good', b === btn));
+        toggle.querySelectorAll('button').forEach(b => b.classList.toggle('pill-muted', b !== btn));
+        await loadOverviewData(meta);
+      });
+    });
+  }
+
+  const fiscalRows = await loadOverviewData(meta);
 
   // fiscal year filter (reps table)
   const fyFilter = document.getElementById('fy-filter');

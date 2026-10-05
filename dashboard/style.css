@@ -113,6 +113,9 @@ a { color: var(--accent); }
 .pill-warn { background: var(--warn-soft); color: var(--warn); cursor: pointer; }
 .pill-warn:hover { filter: brightness(0.96); transform: translateY(-1px); }
 
+#scope-toggle button.pill { border: none; font: inherit; cursor: pointer; }
+#scope-toggle button.pill:hover { filter: brightness(0.96); transform: translateY(-1px); }
+
 .notes-panel {
   max-width: 900px;
   margin: 0.75rem auto 0;

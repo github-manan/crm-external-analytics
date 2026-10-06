@@ -31,10 +31,17 @@
     <div class="suggestions" id="suggestions"></div>
     <div class="chat-log" id="chat-log">
       <div class="msg bot">
-        <div class="bubble">Hi — ask me about leads, deals, pipeline, reps, or targets. Everything I say comes from the same read-only data the dashboards use.</div>
+        <div class="bubble">Hi — ask me about leads, deals, pipeline, reps, or targets. Everything I say comes from the same read-only data the dashboards use. You can also attach a document (&#128206; below, .txt/.csv/.pdf/.xlsx) and ask about it directly — answers from an attached file aren't CRM-verified the way everything else here is, so I'll always say when I'm reading from your file instead of CRM data.</div>
       </div>
     </div>
+    <div id="attachment-row" class="attachment-row" hidden>
+      <span class="attachment-chip" id="attachment-chip"></span>
+      <button type="button" id="attachment-remove" class="attachment-remove" title="Remove attachment">&times;</button>
+    </div>
+    <div id="attachment-error" class="attachment-error" hidden></div>
     <form class="chat-input" id="chat-form">
+      <input type="file" id="attachment-input" accept=".txt,.csv,.pdf,.xlsx" hidden>
+      <button type="button" id="attachment-button" class="attachment-button" title="Attach a document (.txt, .csv, .pdf, .xlsx)">&#128206;</button>
       <textarea id="chat-text" rows="1" placeholder="e.g. Which rep has the highest revenue this year?"></textarea>
       <button type="submit" id="chat-send">Ask</button>
     </form>

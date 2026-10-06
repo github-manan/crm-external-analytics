@@ -717,7 +717,7 @@ def build_headline(tool_log):
         return None
 
 
-def ask(user_message, history=None, max_tool_rounds=4, session=None):
+def ask(user_message, history=None, max_tool_rounds=4, session=None, upload=None):
     """Runs the tool-calling loop. Returns {reply, tool_calls: [...]} for transparency.
 
     session (from serve.py's auth.py) scopes every tool call to the asking
@@ -725,6 +725,14 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None):
     the model to respect on its own. The system prompt note is purely for
     the model's own wording (so it doesn't offer to look up someone else),
     it is not what's actually keeping their data separated.
+
+    upload (from serve.py/documents.py), if given, is {"filename", "text",
+    "truncated"} for a document the user attached. Explicitly a different,
+    weaker guarantee than every CRM tool here: the text is arbitrary and
+    unverified, the model reads it directly rather than calling a tested
+    function, so there is no headline/guaranteed-correct figure for
+    anything it says from it - the prompt below says this to the model,
+    and the chat UI should say it to the user too.
     """
     system_prompt = SYSTEM_PROMPT
     if session and not session.get("is_admin"):
@@ -734,22 +742,62 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None):
             f"If asked about another rep by name, say you can only see their own data, not "
             f"anyone else's."
         )
+    if upload:
+        truncated_note = (
+            " (truncated - this is only the first part of a longer document)" if upload.get("truncated") else ""
+        )
+        system_prompt += (
+            f"\n\n10. A document has been attached: \"{upload['filename']}\"{truncated_note}. Its full text "
+            f"is already given to you below, in this prompt - you can read it right now, this instant, "
+            f"without calling anything. When asked about \"the document\"/\"the file\"/\"this upload\" (or "
+            f"anything that's clearly about its contents, not CRM data), call NO TOOL AT ALL - just read "
+            f"the text below and answer directly in your own reply. This includes company names that "
+            f"appear IN the document: if the document itself already says what you need, do not call "
+            f"search_company_background or any other tool just because a company name is present - you "
+            f"have done this before, called a web-search tool for a fact the attached document already "
+            f"stated, and then contradicted yourself by saying the document 'didn't mention' something it "
+            f"literally said two sentences earlier. Read the attached text first, fully, before deciding "
+            f"you need a tool at all. Separately: this document is NOT verified the way a CRM tool result "
+            f"is - if you state a number or fact from it, that is your own reading of unverified text, not "
+            f"a computed figure, so never present it with the same confidence as a tool-backed answer. If "
+            f"the document genuinely doesn't contain what was asked, say so rather than guessing.\n\n"
+            f"--- Attached document: {upload['filename']} ---\n{upload['text']}\n--- end of document ---"
+        )
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history or [])
     messages.append({"role": "user", "content": user_message})
 
+    # ALL tools are withheld whenever a document is attached - confirmed by
+    # direct, repeated testing that this isn't a one-tool problem. First
+    # tried an explicit "call no tool" instruction alone - didn't stop it
+    # (4/4 tries still called search_company_background the instant a
+    # company name appeared, including one inside the attached text
+    # itself). Then tried removing just that one tool - the model simply
+    # substituted a different one instead (get_segment_diagnostic, the
+    # instant "BFSI" appeared). The model has a general reflex to call
+    # SOME tool on a recognized keyword, regardless of instructions, so
+    # the only reliable fix is removing every tool for that turn. Trade-
+    # off: a message can be answered from the attachment OR from CRM
+    # tools, never genuinely both in one turn - acceptable for a clear,
+    # predictable rule ("while a file's attached, I only read the file")
+    # over a flexible rule that silently hallucinates.
+    tool_schema = [] if upload else TOOL_SCHEMA
+
     tool_log = []
     for round_num in range(max_tool_rounds):
         try:
-            data = _post({
-                "model": MODEL, "messages": messages, "tools": TOOL_SCHEMA, "stream": False,
+            request_payload = {
+                "model": MODEL, "messages": messages, "stream": False,
                 # Low temperature on purpose: this restates business figures,
                 # it doesn't write creatively. Same question has produced two
                 # different (one fabricated) answers run to run at defaults -
                 # more determinism won't fix transcription errors, but it
                 # stops adding random variance on top of them.
                 "options": {"temperature": 0.1},
-            })
+            }
+            if tool_schema:  # omit the key entirely rather than send "tools": [] - untested otherwise
+                request_payload["tools"] = tool_schema
+            data = _post(request_payload)
         except urllib.error.URLError as error:
             return {"reply": f"Can't reach the local model (Ollama) - is it running? ({error})", "tool_calls": tool_log}
 

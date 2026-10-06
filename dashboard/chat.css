@@ -140,6 +140,52 @@
   75% { content: ''; }
 }
 
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+.attachment-row[hidden] { display: none; }
+.attachment-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.attachment-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.3rem;
+}
+.attachment-remove:hover { color: var(--warn); }
+.attachment-error {
+  color: #b91c1c;
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+}
+@media (prefers-color-scheme: dark) { .attachment-error { color: #f87171; } }
+:root[data-theme="dark"] .attachment-error { color: #f87171; }
+
+.attachment-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 12px;
+  padding: 0 0.9rem;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease, ease), color 0.15s var(--ease, ease);
+}
+.attachment-button:hover { border-color: var(--accent-2); color: var(--accent); }
+.attachment-button.has-file { color: var(--accent); border-color: var(--accent-2); }
+
 .chat-input {
   display: flex;
   gap: 0.6rem;

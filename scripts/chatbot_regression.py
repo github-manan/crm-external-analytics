@@ -43,9 +43,12 @@ class Case:
     question: str
     notes: str
     session: dict = None
+    upload: dict = None                 # {"filename", "text", "truncated"} - see chatbot.ask()
     expect_tool: object = None          # str, or a list/tuple of acceptable tools
     expect_args: dict = field(default_factory=dict)   # partial match against the call's args
     expect_blocked: bool = False        # True => expect the admin-only refusal, no real tool call
+    expect_no_tool: bool = False        # True => expect ZERO tool calls (e.g. answered from an attachment)
+    expect_reply_contains: str = None   # substring the final reply must contain (case-insensitive)
 
 
 CASES = [
@@ -130,14 +133,42 @@ CASES = [
          "Non-admin: get_insights' owner must be forced to the session's own name, "
          "same enforcement as every other owner-scoped tool.",
          session=REP, expect_tool="get_insights", expect_args={"owner": "Namrata Dhuri"}),
+
+    # --- uploaded-document Q&A: must answer from the file, call no tool ---
+    # Real bug: the model reflexively called search_company_background the
+    # instant "MitKat Advisory" appeared in the attached text, then (with
+    # that tool removed) substituted get_segment_diagnostic the instant
+    # "BFSI" appeared - ignoring an explicit "call no tool" instruction
+    # both times. Fixed by withholding every tool for the turn, not by
+    # further wording the instruction - this case pins that fix in place.
+    Case("upload_answered_without_tools", "what did the attached document say about which industries we focused on?",
+         "Must answer from the attachment with zero tool calls, and must not claim the document "
+         "lacks something it actually states.",
+         upload={"filename": "summary.txt",
+                 "text": ("Quarterly summary: MitKat Advisory closed 12 new accounts in Q2, "
+                           "with a focus on BFSI and Technology clients."),
+                 "truncated": False},
+         expect_no_tool=True, expect_reply_contains="bfsi"),
 ]
 
 
 def run_case(case):
-    result = chatbot.ask(case.question, session=case.session)
+    result = chatbot.ask(case.question, session=case.session, upload=case.upload)
     tool_log = result.get("tool_calls") or []
-    if not tool_log:
+
+    if case.expect_no_tool:
+        if tool_log:
+            return False, f"expected no tool call at all, got {[t['tool'] for t in tool_log]}"
+    elif not tool_log:
         return False, "no tool was called at all"
+
+    if case.expect_reply_contains:
+        reply = (result.get("reply") or "").lower()
+        if case.expect_reply_contains.lower() not in reply:
+            return False, f"expected reply to contain {case.expect_reply_contains!r}, got: {result.get('reply')!r}"
+
+    if not tool_log:
+        return True, result.get("reply", "ok")[:80]
 
     last = tool_log[-1]
     expected = case.expect_tool

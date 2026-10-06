@@ -22,6 +22,7 @@ Usage:
     python3 scripts/serve.py 9000                 # custom port
 """
 
+import base64
 import http.server
 import json
 import os
@@ -41,6 +42,7 @@ import data_quality
 import chatbot
 import auth
 import adoption
+import documents
 
 # Holds the current request's session per-thread (ThreadingHTTPServer gives
 # each request its own thread) so endpoint functions can read "who's asking"
@@ -446,14 +448,45 @@ def ep_chat(body):
     if not message:
         return {"error": "pass {\"message\": \"...\"}"}, 400
     history = (body or {}).get("history", [])
+    session = current_session()
+
+    upload = None
+    upload_id = (body or {}).get("upload_id")
+    if upload_id:
+        upload = documents.get_upload(upload_id, session["username"])
+        if not upload:
+            return {"error": "that attached file isn't available anymore - try uploading it again"}, 400
+
     try:
-        return chatbot.ask(message, history, session=current_session())
+        return chatbot.ask(message, history, session=session, upload=upload)
     except Exception as error:  # noqa: BLE001 - surface it to the chat UI, don't 500 silently
         return {"error": str(error)}, 500
 
 
+def ep_upload(body):
+    """Accepts a base64-encoded file (not multipart - keeps the existing
+    JSON-only POST plumbing, no new request parsing needed) and stores its
+    extracted text, scoped to the uploader. See documents.py."""
+    session = current_session()
+    filename = (body or {}).get("filename", "").strip()
+    content_b64 = (body or {}).get("content_base64", "")
+    if not filename or not content_b64:
+        return {"error": "pass {\"filename\": \"...\", \"content_base64\": \"...\"}"}, 400
+    try:
+        content_bytes = base64.b64decode(content_b64)
+    except Exception:  # noqa: BLE001 - malformed input, not a server problem
+        return {"error": "invalid file data"}, 400
+    if len(content_bytes) > documents.MAX_FILE_BYTES:
+        return {"error": f"file too large - max {documents.MAX_FILE_BYTES // (1024 * 1024)}MB"}, 400
+    try:
+        return documents.store_upload(session["username"], filename, content_bytes)
+    except ValueError as error:
+        return {"error": str(error)}, 400
+
+
 POST_ROUTES = {
     "/api/chat": ep_chat,
+    "/api/chat/upload": ep_upload,
 }
 
 # These return raw, unfiltered rows from any view with no owner scoping at

@@ -7,7 +7,8 @@
 // serve.py/chatbot.py, not here - this is just the page gate + UI.
 requireSession();
 
-const state = { history: [] };
+const state = { history: [], uploadId: null, uploadFilename: null };
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // keep in sync with documents.py's MAX_FILE_BYTES
 
 const SUGGESTIONS = [
   'How many leads do we have and what%27s our conversion rate?',
@@ -193,10 +194,12 @@ async function send(message) {
   const thinkingEl = addMessage('bot', 'Thinking', { thinking: true });
 
   try {
+    const body = { message, history: state.history };
+    if (state.uploadId) body.upload_id = state.uploadId;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, history: state.history }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     thinkingEl.remove();
@@ -256,6 +259,84 @@ async function checkStatus() {
     el.textContent = 'API unreachable — run: python scripts/serve.py';
   }
 }
+
+// ---------- document upload ----------
+
+function showAttachmentError(msg) {
+  const el = document.getElementById('attachment-error');
+  el.textContent = msg;
+  el.hidden = false;
+}
+function clearAttachmentError() {
+  document.getElementById('attachment-error').hidden = true;
+}
+
+function setAttachment(uploadId, filename) {
+  state.uploadId = uploadId;
+  state.uploadFilename = filename;
+  document.getElementById('attachment-chip').textContent = `📎 ${filename}`;
+  document.getElementById('attachment-row').hidden = false;
+  document.getElementById('attachment-button').classList.add('has-file');
+}
+function clearAttachment() {
+  state.uploadId = null;
+  state.uploadFilename = null;
+  document.getElementById('attachment-row').hidden = true;
+  document.getElementById('attachment-button').classList.remove('has-file');
+  document.getElementById('attachment-input').value = '';
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]); // strip the data: URL prefix
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById('attachment-button').addEventListener('click', () => {
+  document.getElementById('attachment-input').click();
+});
+
+document.getElementById('attachment-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  clearAttachmentError();
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    showAttachmentError(`"${file.name}" is too large - max ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB.`);
+    document.getElementById('attachment-input').value = '';
+    return;
+  }
+
+  const button = document.getElementById('attachment-button');
+  button.disabled = true;
+  try {
+    const content_base64 = await fileToBase64(file);
+    const res = await fetch('/api/chat/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, content_base64 }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      showAttachmentError(data.error || `Upload failed (${res.status})`);
+      document.getElementById('attachment-input').value = '';
+      return;
+    }
+    setAttachment(data.upload_id, data.filename);
+    if (data.truncated) {
+      showAttachmentError(`"${data.filename}" is long - only the first part was attached.`);
+    }
+  } catch (err) {
+    showAttachmentError(`Couldn't upload "${file.name}": ${err.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('attachment-remove').addEventListener('click', clearAttachment);
 
 // Convenience for testing/linking: ?q=<question> auto-sends on load.
 const preset = new URLSearchParams(location.search).get('q');

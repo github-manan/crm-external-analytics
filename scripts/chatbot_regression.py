@@ -126,6 +126,10 @@ CASES = [
          "Open-ended question with no named segment - must route to get_insights, "
          "not a specific segment_diagnostic lookup.",
          expect_tool="get_insights"),
+    Case("insights_rep_forced_to_self", "what stands out for me right now?",
+         "Non-admin: get_insights' owner must be forced to the session's own name, "
+         "same enforcement as every other owner-scoped tool.",
+         session=REP, expect_tool="get_insights", expect_args={"owner": "Namrata Dhuri"}),
 ]
 
 

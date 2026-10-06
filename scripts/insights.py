@@ -15,6 +15,7 @@ same spirit as every sample_size_warning elsewhere in this project, not
 a verdict.
 """
 
+import weekly
 import segments
 from weekly import rows
 
@@ -22,6 +23,11 @@ DIVERGENCE_POINTS = 10
 PIPELINES = ("Consulting", "Datasurfr", "MSS", "Renewal")
 TOP_N_INDUSTRIES = 6
 TOP_N_COUNTRIES = 6
+
+# Floor before a rep's stuck-deal rate is trusted enough to compare against
+# the company average - same spirit as segments.py's MIN_SAMPLE, just a
+# much lower bar since open-deal counts per rep are small to begin with.
+MIN_OPEN_DEALS = 3
 
 
 def _divergence(dimension, value):
@@ -33,17 +39,82 @@ def _divergence(dimension, value):
     diff_points = round((rate - company_rate) * 100, 1)
     if abs(diff_points) < DIVERGENCE_POINTS:
         return None
+    metric = "win rate" if dimension == "pipeline" else "conversion rate"
+    direction = "above" if diff_points > 0 else "below"
+    rate_pct = f"{rate * 100:.1f}%"
     return {
+        "category": "segment_divergence",
         "dimension": dimension,
         "value": value,
-        "metric": "win rate" if dimension == "pipeline" else "conversion rate",
+        "metric": metric,
         "rate": rate,
-        "rate_pct": f"{rate * 100:.1f}%",
+        "rate_pct": rate_pct,
         "company_rate": company_rate,
         "company_rate_pct": f"{company_rate * 100:.1f}%",
         "diff_points": diff_points,
-        "direction": "above" if diff_points > 0 else "below",
+        "direction": direction,
+        "headline": f"{value}: {rate_pct} {metric} ({direction} company average by {abs(diff_points)}pts)",
     }
+
+
+def stuck_rate_divergences():
+    """Each rep's share of open deals with no stage change in
+    weekly.STUCK_AFTER_DAYS (the same stuck-deal definition the Weekly
+    Review dashboard already uses, not a new one) vs. the company-wide
+    weighted average - flags reps whose open pipeline is notably fresher
+    or notably staler than peers. Requires >= MIN_OPEN_DEALS open deals.
+
+    Checked real data before building this: nearly every rep sits at
+    80-100% stuck by this definition (a known, already-tracked company-
+    wide gap - see data_quality.py's recent_activity metric), so a flat
+    "who's above X%" threshold would flag almost everyone and tell nobody
+    anything. Comparing against the company average instead only
+    surfaces genuine outliers - in practice, right now, that means reps
+    whose pipeline is notably FRESHER than peers, not staler (there isn't
+    enough spread on the staler side to mean anything).
+    """
+    rows_ = rows(f"""
+        SELECT d.owner_name,
+               COUNT(*) AS open_deals,
+               SUM(CASE WHEN last_change IS NULL
+                        OR julianday('now') - julianday(last_change) >= {weekly.STUCK_AFTER_DAYS}
+                   THEN 1 ELSE 0 END) AS stuck
+        FROM (
+            SELECT d.id, d.owner_name, MAX(h.changed_at) AS last_change
+            FROM v_deals d LEFT JOIN v_deal_history h ON h.deal_id = d.id
+            WHERE d.is_open = 1 AND d.owner_name IS NOT NULL
+            GROUP BY d.id
+        ) d
+        GROUP BY owner_name HAVING open_deals >= ?
+    """, (MIN_OPEN_DEALS,))
+    if not rows_:
+        return []
+
+    total_open = sum(r["open_deals"] for r in rows_)
+    total_stuck = sum(r["stuck"] for r in rows_)
+    company_rate = total_stuck / total_open if total_open else 0
+
+    findings = []
+    for r in rows_:
+        rate = r["stuck"] / r["open_deals"]
+        diff_points = round((rate - company_rate) * 100, 1)
+        if abs(diff_points) < DIVERGENCE_POINTS:
+            continue
+        direction = "staler than" if diff_points > 0 else "fresher than"
+        rate_pct = f"{rate * 100:.0f}%"
+        findings.append({
+            "category": "stuck_deal_rate",
+            "owner_name": r["owner_name"],
+            "open_deals": r["open_deals"],
+            "stuck_deals": r["stuck"],
+            "rate_pct": rate_pct,
+            "company_rate_pct": f"{company_rate * 100:.0f}%",
+            "diff_points": diff_points,
+            "direction": direction,
+            "headline": (f"{r['owner_name']}: {r['stuck']}/{r['open_deals']} open deals stuck 21+ days "
+                         f"({rate_pct}, {direction} the {company_rate * 100:.0f}% company average)"),
+        })
+    return findings
 
 
 def _top_values(column, limit):
@@ -58,7 +129,12 @@ def _top_values(column, limit):
     )]
 
 
-def scan():
+def scan(owner=None):
+    """owner, if given, restricts the stuck_deal_rate category (which
+    names individual reps) to just that one person - segment_divergence
+    findings are company-wide and never restricted, same policy as
+    segment_diagnostic itself (pipeline/industry/country rates don't name
+    anyone)."""
     findings = []
     for pipeline in PIPELINES:
         hit = _divergence("pipeline", pipeline)
@@ -72,5 +148,11 @@ def scan():
         hit = _divergence("country", country)
         if hit:
             findings.append(hit)
+
+    stuck_findings = stuck_rate_divergences()
+    if owner:
+        stuck_findings = [f for f in stuck_findings if f["owner_name"] == owner]
+    findings.extend(stuck_findings)
+
     findings.sort(key=lambda f: abs(f["diff_points"]), reverse=True)
     return findings

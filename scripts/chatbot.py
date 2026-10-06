@@ -54,7 +54,7 @@ Hard rules:
 6. Money is in Indian Rupees. Every "*_inr" field comes with a "*_inr_fmt" sibling (e.g. revenue_inr_fmt: "₹80.78 Cr") - always quote that pre-formatted string exactly as given. Do not convert the raw rupee number yourself; you have gotten that arithmetic wrong before.
 7. When useful, briefly name which figure/tool your answer is based on, so it's checkable.
 8. get_data_quality_progress's each metric has a "trend" field - if it says "NO TREND YET", say plainly that tracking just started and there's nothing to compare yet. Never say a number is "up", "improving", or "increasing" unless that metric's own "trend" field says "improved" - you have invented "up from previous periods" out of nothing before.
-8b. get_insights flags a segment whose rate statistically diverges from the company average - it does NOT say why. Never invent a cause or reason (e.g. never say "Renewal is underperforming because of X") - you have no data on why, only that it diverges. Frame every finding as "worth a look", never as a conclusion, a prediction, or a root cause. Each finding has pre-formatted "rate_pct"/"company_rate_pct" strings (e.g. "10.0%") - quote those exactly, do not restate "rate"/"company_rate" as a raw decimal (0.1 is not "0.1%").
+8b. get_insights flags a segment or rep stat that diverges from the company average - it does NOT say why. Never invent a cause or reason (e.g. never say "Renewal is underperforming because of X") - you have no data on why, only that it diverges. Frame every finding as "worth a look", never as a conclusion, a prediction, or a root cause. Each finding already has a pre-built "headline" string (e.g. "Renewal: 10.0% win rate (below company average by 69.1pts)") - quote that or the "rate_pct"/"company_rate_pct" strings exactly, never restate "rate"/"company_rate" as a raw decimal (0.1 is not "0.1%"). A "stuck_deal_rate" finding names one rep - only mention it if the person asking is that rep or an admin (the tool already enforces this, but don't imply a non-admin could ask about anyone else's).
 
 Keep answers short and direct - this is a chat widget, not a report."""
 
@@ -70,6 +70,7 @@ OWNER_SCOPED_TOOLS = {
     "get_deals_by_stage", "get_total_leads", "get_lead_status_breakdown",
     "get_leads_by_source", "get_lead_journey", "get_revenue_target",
     "get_weekly_kpis", "get_things_needing_attention", "get_hot_leads",
+    "get_insights",
 }
 ADMIN_ONLY_TOOLS = {"get_rep_performance", "list_sales_reps", "get_user_activity"}
 
@@ -343,12 +344,12 @@ def tool_data_quality(_args):
     return data_quality.current()
 
 
-def tool_insights(_args):
-    findings = insights.scan()
+def tool_insights(args):
+    findings = insights.scan(owner=args.get("owner"))
     return {
-        "note": (f"Segments whose rate diverges {insights.DIVERGENCE_POINTS}+ percentage points from "
-                  "the company average - a prompt to look closer, not a verdict. Small-sample segments "
-                  "are already excluded, same threshold segment_diagnostic uses."),
+        "note": (f"Segment and rep-level stats that diverge {insights.DIVERGENCE_POINTS}+ percentage "
+                  "points from the company average - a prompt to look closer, not a verdict. "
+                  "Small-sample segments/reps are already excluded."),
         "divergence_threshold_points": insights.DIVERGENCE_POINTS,
         "findings": findings,
     }
@@ -472,7 +473,7 @@ TOOL_SCHEMA = [
         "name": "get_weekly_kpis",
         "description": "This week's leads/revenue/pipeline/new-accounts vs. the previous week, with % change. Good for 'how's this week going' questions.",
         "parameters": {"type": "object", "properties": {
-            "week": {"type": "string", "description": "Any date (YYYY-MM-DD) inside the target week. Omit for the current week."},
+            "week": {"type": "string", "description": "ONLY pass this if the user named a specific past date/week. For 'this week' / 'how's this week going' / no date mentioned at all, leave this parameter out of the call entirely - do not fill it with placeholder text, 'any date', or anything else. If given, must be a real YYYY-MM-DD date."},
             "owner": {"type": "string"},
         }},
     }},
@@ -532,7 +533,7 @@ TOOL_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "get_insights",
-        "description": "Scans every pipeline, and the biggest industries/countries, for ones whose win/conversion rate diverges notably from the company average - surfaces what's worth a look WITHOUT already knowing which segment to ask about. Use for open-ended questions like 'what stands out right now', 'any notable trends', 'what should I look into', 'give me some insights'. This is a prompt to look closer, not a prediction or a verdict - small-sample segments are already excluded.",
+        "description": "Scans every pipeline and the biggest industries/countries for ones whose win/conversion rate diverges notably from the company average, plus (for the asking rep, or every rep if admin) whether their open-deal stuck-rate diverges from the company average - surfaces what's worth a look WITHOUT already knowing what to ask about. Use for open-ended questions like 'what stands out right now', 'any notable trends', 'what should I look into', 'give me some insights'. This is a prompt to look closer, not a prediction or a verdict - small-sample segments/reps are already excluded.",
         "parameters": {"type": "object", "properties": {}},
     }},
 ]
@@ -675,8 +676,7 @@ def _headline_insights(data):
         return f"Nothing diverges {data.get('divergence_threshold_points', 10)}+ points from the company average right now."
     top = findings[0]
     more = f" (+{len(findings) - 1} more)" if len(findings) > 1 else ""
-    return (f"{top['value']}: {top['rate_pct']} {top['metric']} ({top['direction']} company average "
-            f"by {abs(top['diff_points'])}pts){more}")
+    return top["headline"] + more
 
 
 HEADLINE_BUILDERS = {
@@ -798,7 +798,17 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None):
                 if is_non_admin and name in OWNER_SCOPED_TOOLS:
                     args["owner"] = session.get("owner_name")
                 fn = TOOLS.get(name)
-                result = fn(args) if fn else {"error": f"unknown tool '{name}'"}
+                if not fn:
+                    result = {"error": f"unknown tool '{name}'"}
+                else:
+                    try:
+                        result = fn(args)
+                    except Exception as error:  # noqa: BLE001 - a malformed argument from the
+                        # model (confirmed: it has echoed a parameter's own description text
+                        # back as the value, e.g. "any date (" for a date field) must not crash
+                        # the whole response - surface it as a tool error instead.
+                        result = {"error": f"That didn't work ({error}) - try rephrasing, "
+                                            "or ask without specifying a date/filter."}
             clean_result = strip_raw_money(result)
             # Full verified data goes back with the response too, not just to
             # the model - the model's prose can mis-transcribe a number even

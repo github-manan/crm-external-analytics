@@ -53,6 +53,12 @@ def _divergence(dimension, value):
         "company_rate_pct": f"{company_rate * 100:.1f}%",
         "diff_points": diff_points,
         "direction": direction,
+        # Computed here, not inferred from the sign of diff_points by a
+        # caller (chart, chatbot, anything) - "above average" is good for a
+        # win/conversion rate, but for stuck_deal_rate below it's the good
+        # side (see stuck_rate_divergences) - the two categories invert.
+        "favorable": diff_points > 0,
+        "label": f"{value} ({dimension})",
         "headline": f"{value}: {rate_pct} {metric} ({direction} company average by {abs(diff_points)}pts)",
     }
 
@@ -111,6 +117,10 @@ def stuck_rate_divergences():
             "company_rate_pct": f"{company_rate * 100:.0f}%",
             "diff_points": diff_points,
             "direction": direction,
+            # Inverted vs segment_divergence: here a HIGHER stuck-rate is
+            # worse, so "favorable" is the opposite sign test.
+            "favorable": diff_points < 0,
+            "label": f"{r['owner_name']} (stuck rate)",
             "headline": (f"{r['owner_name']}: {r['stuck']}/{r['open_deals']} open deals stuck 21+ days "
                          f"({rate_pct}, {direction} the {company_rate * 100:.0f}% company average)"),
         })

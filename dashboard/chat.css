@@ -79,6 +79,22 @@
   padding-left: 0.2rem;
 }
 
+.insights-chart-wrap {
+  margin-top: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem 0.3rem;
+  max-width: 100%;
+  box-shadow: var(--shadow-sm);
+}
+.chart-more-note {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
 .verified-data {
   margin-top: 0.4rem;
   font-size: 0.78rem;

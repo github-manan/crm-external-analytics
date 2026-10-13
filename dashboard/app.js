@@ -1,4 +1,4 @@
-// MitKat Sales Analytics — reads the local read-only JSON API only.
+// CRMSurfr — reads the local read-only JSON API only.
 // See README.md "Read this before writing any query" before changing any query here.
 
 const API = '';

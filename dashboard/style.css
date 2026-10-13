@@ -100,6 +100,17 @@ a { color: var(--accent); }
   z-index: 10;
 }
 
+.brand { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.55rem; }
+.brand-mark { flex: none; display: block; color: var(--accent); }
+.brand-word { font-size: 1.05rem; font-weight: 800; letter-spacing: -0.015em; color: var(--text); }
+.brand-word .brand-accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.login-card .brand { margin-bottom: 0.9rem; }
+
 .dash-nav { display: flex; gap: 0.35rem; margin-bottom: 0.7rem; }
 .dash-nav a {
   font-size: 0.78rem;

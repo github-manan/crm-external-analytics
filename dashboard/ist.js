@@ -1,29 +1,9 @@
-// Sales Review - began as a copy of the native Zoho "IST Dashboard", then
+// IST Dashboard - began as a copy of the native Zoho "IST Dashboard", then
 // absorbed the Weekly Review (week picker, what moved, needs attention).
 // GET only; never writes to Zoho. See ist.py for the "what's replicated vs.
 // redefined" notes, and weekly.py's DEALS_AS_OF for how past weeks work.
 
-const PALETTE = ['#1d4ed8', '#0891b2', '#d97706', '#7c3aed', '#dc2626', '#059669',
-                 '#be185d', '#65a30d', '#0284c7', '#ca8a04', '#9333ea', '#0d9488'];
-// resolvedTheme() (theme.js) respects an explicit toggle choice, falling
-// back to the OS preference - not just raw matchMedia, which would ignore
-// the toggle entirely.
-const dark = resolvedTheme() === 'dark';
-const GRID_COLOR = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-const TICK_COLOR = dark ? '#94a0b8' : '#64748b';
-
-Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-Chart.defaults.font.size = 12;
-Chart.defaults.color = TICK_COLOR;
-Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
-Chart.defaults.plugins.tooltip.titleColor = '#fff';
-Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
-Chart.defaults.plugins.tooltip.padding = 10;
-Chart.defaults.plugins.tooltip.cornerRadius = 8;
-Chart.defaults.plugins.tooltip.displayColors = false;
-Chart.defaults.elements.line.borderWidth = 2.5;
-Chart.defaults.elements.bar.borderRadius = 6;
-Chart.defaults.elements.bar.borderSkipped = false;
+// Chart colors, defaults and baseGrid() come from charts.js.
 
 const state = { owner: '', week: null, currentWeek: null, tab: 'stuck', attention: null, stageRows: [] };
 const isPastWeek = () => state.week && state.week !== state.currentWeek;
@@ -76,10 +56,6 @@ function weekLabel(startISO) {
 function weekEnd() {
   const d = new Date(state.week + 'T00:00:00'); d.setDate(d.getDate() + 6);
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function baseGrid(axis) {
-  return { grid: { color: GRID_COLOR }, ticks: { color: TICK_COLOR }, ...axis };
 }
 
 // ---------- top bar ----------
@@ -255,7 +231,7 @@ function renderTarget(t) {
 function renderFunnel(j) {
   document.getElementById('funnel').innerHTML = j.steps.map((s, i) => `
     <div class="fstep">
-      <div class="fbar" style="background:${PALETTE[i % PALETTE.length]}"></div>
+      <div class="fbar" style="background:${CHART.ramp[i] ?? CHART.ramp[4]}"></div>
       <div class="fcount">${fmtInt(s.count)}</div>
       <div class="fname">${esc(s.stage)}</div>
       <div class="frate">${s.rate_from_prev !== null ? s.rate_from_prev + '% from previous' : '&nbsp;'}</div>
@@ -270,27 +246,25 @@ async function loadJourney() {
 
 // ---------- Leads by source ----------
 
-let sourcesChart;
 async function loadSources(scope) {
   const { rows } = await getJSON(`/api/weekly/sources?scope=${scope}`);
+  const el = document.getElementById('source-list');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty">No leads created ${scope === 'week' ? 'in the selected week' : 'yet'}.</div>`;
+    return;
+  }
+  // Ranked bars, top 10 + "Other": one hue, so length carries the
+  // comparison instead of a 12-color donut.
   const top = rows.slice(0, 10);
   const rest = rows.slice(10).reduce((s, r) => s + r.n, 0);
-  const labels = top.map(r => r.source).concat(rest ? ['Other'] : []);
-  const data = top.map(r => r.n).concat(rest ? [rest] : []);
+  const items = top.map(r => ({ label: r.source, n: r.n })).concat(rest ? [{ label: 'Other', n: rest }] : []);
   const total = rows.reduce((s, r) => s + r.n, 0) || 1;
-
-  const ctx = document.getElementById('chart-sources');
-  sourcesChart?.destroy();
-  sourcesChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels, datasets: [{ data, backgroundColor: labels.map((_, i) => PALETTE[i % PALETTE.length]) }] },
-    options: { plugins: { legend: { display: false } }, cutout: '60%' },
-  });
-
-  document.getElementById('source-list').innerHTML = labels.map((label, i) => `
-    <div class="src-row">
-      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${PALETTE[i % PALETTE.length]};margin-right:6px;"></span>${esc(label)}</span>
-      <span>${fmtInt(data[i])} (${(data[i] / total * 100).toFixed(1)}%)</span>
+  const max = Math.max(...items.map(r => r.n));
+  el.innerHTML = items.map(r => `
+    <div class="hbar" title="${esc(r.label)}: ${fmtInt(r.n)} (${(r.n / total * 100).toFixed(1)}%)">
+      <span class="hbar-label">${esc(r.label)}</span>
+      <span class="hbar-track"><span class="hbar-fill" style="width:${(r.n / max * 100).toFixed(1)}%"></span></span>
+      <span class="hbar-value">${fmtInt(r.n)} <span class="hbar-pct">${(r.n / total * 100).toFixed(0)}%</span></span>
     </div>`).join('');
 }
 
@@ -300,19 +274,26 @@ let stagesChart;
 function renderStages(rows, pipeline) {
   const filtered = rows.filter(r => r.pipeline === pipeline).sort((a, b) => a.stage_order - b.stage_order);
   const ctx = document.getElementById('chart-stages');
+  // Horizontal, so long stage names read without tilting
+  fitBarHeight(ctx, filtered.length);
   stagesChart?.destroy();
   stagesChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: filtered.map(r => r.stage),
-      datasets: [{ label: 'Deals', data: filtered.map(r => r.deal_count), backgroundColor: PALETTE[2] }],
+      datasets: [{ label: 'Deals', data: filtered.map(r => r.deal_count), backgroundColor: CHART.series[0] }],
     },
     options: {
+      indexAxis: 'y',
+      interaction: { mode: 'nearest', axis: 'y', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: (c) => [`Deals: ${fmtInt(filtered[c.dataIndex].deal_count)}`, `Value: ${fmtCr(filtered[c.dataIndex].value_inr)}`] } },
       },
-      scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: 'Record Count', color: TICK_COLOR } }) },
+      scales: {
+        x: baseGrid({ title: { display: true, text: 'Deals', color: CHART.tick } }),
+        y: baseGrid({ grid: { display: false } }),
+      },
     },
   });
 }
@@ -370,17 +351,19 @@ async function loadLeadStatus() {
   document.getElementById('status-note').textContent = isPastWeek()
     ? `Leads created by ${weekEnd()}, with today's status (Zoho keeps no status history)` : '';
   const ctx = document.getElementById('chart-status');
+  fitBarHeight(ctx, rows.length, 22);
   statusChart?.destroy();
   statusChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => r.status),
-      datasets: [{ label: 'Leads', data: rows.map(r => r.n), backgroundColor: PALETTE[5] }],
+      datasets: [{ label: 'Leads', data: rows.map(r => r.n), backgroundColor: CHART.series[0] }],
     },
     options: {
       indexAxis: 'y',
+      interaction: { mode: 'index', axis: 'y', intersect: false },
       plugins: { legend: { display: false } },
-      scales: { x: baseGrid({ title: { display: true, text: 'Record Count', color: TICK_COLOR } }), y: baseGrid({ grid: { display: false } }) },
+      scales: { x: baseGrid({ title: { display: true, text: 'Leads', color: CHART.tick } }), y: baseGrid({ grid: { display: false } }) },
     },
   });
 }

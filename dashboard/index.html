@@ -10,28 +10,31 @@
 <body>
 
 <header class="topbar">
-  <div class="topbar-title">
-    <div class="brand">
-      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
-        <path d="M3.5 13.5c1.6-3 3.4-4.5 7.5-4.5s5.9 1.5 7.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M3.5 17c1.6-2.2 3.4-3.3 7.5-3.3s5.9 1.1 7.5 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
-      </svg>
-      <span class="brand-word">CRM<span class="brand-accent">Surfr</span></span>
-    </div>
-    <nav class="dash-nav">
-      <a href="index.html" class="current">Overall</a>
-      <a href="ist.html">Sales Review</a>
-      <a href="chat.html">Assistant</a>
-    </nav>
-    <h1>Overall</h1>
-    <p class="subtitle">Read-only view over Zoho CRM &middot; Consulting &middot; Datasurfr &middot; MSS &middot; Renewal</p>
+  <div class="brand">
+    <svg class="brand-mark" width="20" height="20" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
+      <path d="M3.5 13.5c1.6-3 3.4-4.5 7.5-4.5s5.9 1.5 7.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <path d="M3.5 17c1.6-2.2 3.4-3.3 7.5-3.3s5.9 1.1 7.5 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+    </svg>
+    <span class="brand-word">CRM<span class="brand-accent">Surfr</span></span>
   </div>
+  <nav class="dash-nav" aria-label="Dashboards">
+    <a href="index.html" class="current" aria-current="page">Overall</a>
+    <a href="ist.html">IST Dashboard</a>
+    <a href="chat.html">Assistant</a>
+  </nav>
   <div class="topbar-meta">
     <span id="sync-status" class="pill pill-muted">connecting&hellip;</span>
     <button id="notes-toggle" class="pill pill-warn" type="button">Data notes</button>
   </div>
 </header>
+
+<section class="page-head">
+  <div>
+    <h1>Overall</h1>
+    <p class="subtitle">Read-only view over Zoho CRM &middot; Consulting &middot; Datasurfr &middot; MSS &middot; Renewal</p>
+  </div>
+</section>
 
 <div id="notes-panel" class="notes-panel" hidden>
   <div class="notes-panel-head">
@@ -65,7 +68,7 @@
         <h2>Bookings by fiscal year</h2>
         <span class="card-note">April&ndash;March &middot; won deals only</span>
       </div>
-      <canvas id="chart-fiscal" height="170"></canvas>
+      <div class="chart-box"><canvas id="chart-fiscal"></canvas></div>
     </div>
 
     <div class="card">
@@ -73,7 +76,7 @@
         <h2>Pipeline mix</h2>
         <span class="card-note">Won vs. open value, all-time</span>
       </div>
-      <canvas id="chart-pipelines" height="170"></canvas>
+      <div class="chart-box"><canvas id="chart-pipelines"></canvas></div>
     </div>
   </section>
 
@@ -86,7 +89,7 @@
       </div>
     </div>
     <p class="card-note">April and March alone make up a large share of all-time bookings &mdash; expect big swings at fiscal year boundaries, not a data error.</p>
-    <canvas id="chart-monthly" height="90"></canvas>
+    <div class="chart-box short"><canvas id="chart-monthly"></canvas></div>
   </section>
 
   <section class="card">
@@ -98,16 +101,16 @@
       </div>
     </div>
     <p class="card-note">Each pipeline has its own stage set &mdash; funnels are never blended across pipelines.</p>
-    <canvas id="chart-stages" height="170"></canvas>
+    <div class="chart-box"><canvas id="chart-stages"></canvas></div>
   </section>
 
   <section class="grid-2">
     <div class="card">
       <div class="card-head">
         <h2>Seasonality</h2>
-        <span class="card-note">Won revenue by calendar month, all years combined</span>
+        <span class="card-note">Won revenue by calendar month, all years · <span class="key-swatch" style="background:var(--series-2)"></span>Mar–Apr (fiscal year-end)</span>
       </div>
-      <canvas id="chart-seasonality" height="170"></canvas>
+      <div class="chart-box"><canvas id="chart-seasonality"></canvas></div>
     </div>
 
     <div class="card">
@@ -115,7 +118,7 @@
         <h2>Open pipeline over time</h2>
         <span class="card-note">From daily snapshots &mdash; history starts the day this dashboard went live</span>
       </div>
-      <canvas id="chart-history" height="170"></canvas>
+      <div class="chart-box"><canvas id="chart-history"></canvas></div>
     </div>
   </section>
 
@@ -146,7 +149,7 @@
       <button id="trend-range-clear" type="button" class="pill pill-muted" style="cursor:pointer;">Clear range</button>
     </div>
     <p class="card-note">Won deals/revenue over time for the selected individual (or everyone) &mdash; "yearly" is the same April&ndash;March fiscal year used elsewhere on this page. Leave the date range blank for all-time.</p>
-    <canvas id="chart-rep-trend" height="85"></canvas>
+    <div class="chart-box short"><canvas id="chart-rep-trend"></canvas></div>
 
     <div class="table-wrap" style="margin-top: 1.2rem;">
       <table id="reps-table">
@@ -223,6 +226,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 <script src="theme.js"></script>
+<script src="charts.js"></script>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 </body>

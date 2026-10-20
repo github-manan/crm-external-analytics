@@ -11,29 +11,32 @@
 <body>
 
 <header class="topbar">
-  <div class="topbar-title">
-    <div class="brand">
-      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
-        <path d="M3.5 13.5c1.6-3 3.4-4.5 7.5-4.5s5.9 1.5 7.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M3.5 17c1.6-2.2 3.4-3.3 7.5-3.3s5.9 1.1 7.5 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
-      </svg>
-      <span class="brand-word">CRM<span class="brand-accent">Surfr</span></span>
-    </div>
-    <nav class="dash-nav">
-      <a href="index.html">Overall</a>
-      <a href="ist.html">Sales Review</a>
-      <a href="chat.html" class="current">Assistant</a>
-    </nav>
-    <h1>Assistant</h1>
-    <p class="subtitle">Runs entirely on this machine (Ollama) &middot; never sends CRM data anywhere &middot; read-only</p>
+  <div class="brand">
+    <svg class="brand-mark" width="20" height="20" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
+      <path d="M3.5 13.5c1.6-3 3.4-4.5 7.5-4.5s5.9 1.5 7.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <path d="M3.5 17c1.6-2.2 3.4-3.3 7.5-3.3s5.9 1.1 7.5 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+    </svg>
+    <span class="brand-word">CRM<span class="brand-accent">Surfr</span></span>
   </div>
+  <nav class="dash-nav" aria-label="Dashboards">
+    <a href="index.html">Overall</a>
+    <a href="ist.html">IST Dashboard</a>
+    <a href="chat.html" class="current" aria-current="page">Assistant</a>
+  </nav>
   <div class="topbar-meta">
     <span id="sync-status" class="pill pill-muted">checking&hellip;</span>
   </div>
 </header>
 
-<main id="app" style="padding-top:1.25rem;">
+<section class="page-head narrow">
+  <div>
+    <h1>Assistant</h1>
+    <p class="subtitle">Runs entirely on this machine (Ollama) &middot; never sends CRM data anywhere &middot; read-only</p>
+  </div>
+</section>
+
+<main id="app">
   <div class="chat-wrap">
     <div class="suggestions" id="suggestions"></div>
     <div class="chat-log" id="chat-log">
@@ -61,6 +64,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 <script src="theme.js"></script>
+<script src="charts.js"></script>
 <script src="auth.js"></script>
 <script src="chat.js"></script>
 </body>

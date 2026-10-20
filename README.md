@@ -47,15 +47,19 @@ The dashboard is hand-built — no BI platform. Two ways to get at the data.
 
 | Page | Owner | Purpose |
 |---|---|---|
-| `dashboard/index.html` + `app.js` + `style.css` | Ankit | Overall sales dashboard - bookings, funnel, seasonality, reps |
-| `dashboard/ist.html` + `ist.js` + `ist.css` | Ankit / Manan | Sales Review - the weekly review call with the heads and CEO |
+| `dashboard/index.html` + `app.js` | Ankit | Overall - the CEO view: bookings, pipeline, seasonality, reps |
+| `dashboard/ist.html` + `ist.js` + `ist.css` | Ankit / Manan | IST Dashboard - the IST team's weekly view (absorbed the Weekly Review) |
 | `dashboard/chat.html` + `chat.js` + `chat.css` | Ankit | Assistant (local chatbot over the CRM data) |
 
-The Sales Review began as a copy of the native Zoho "IST Dashboard" and
+The IST Dashboard began as a copy of the native Zoho "IST Dashboard" and
 absorbed the old Weekly Review page (`weekly.html`, removed). Open it at
 `http://localhost:8420/ist.html`.
 
-**The Sales Review uses:**
+Shared styling: `style.css` holds the color tokens (light and dark) and
+`charts.js` the Chart.js theme every page uses - chart colors are validated
+steps, so change them there, not per chart.
+
+**The IST Dashboard uses:**
 
 | Endpoint | Returns |
 |---|---|

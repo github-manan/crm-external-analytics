@@ -47,20 +47,29 @@ def _rate_table(column):
     return table, overall
 
 
-def hot_leads(owner=None, limit=20):
+def hot_leads(owner=None, limit=20, as_of=None):
+    """`as_of` (a past date) limits the pool to leads that existed and were
+    still unconverted then. The score itself is still today's - there's no
+    history of when a lead was last touched or what its status was."""
     source_rates, overall_source = _rate_table("lead_source")
     industry_rates, overall_industry = _rate_table("industry")
 
     status_list = ",".join("?" for _ in DEAD_STATUSES)
     w, p = owner_clause(owner)
+    if as_of:
+        pool = """date(created_time) <= ?
+          AND (is_converted = 0 OR date(converted_date) > ?)"""
+        pool_params = [as_of, as_of]
+    else:
+        pool, pool_params = "is_converted = 0", []
     live = rows(f"""
         SELECT id, full_name, company, lead_source, industry, lead_status,
                owner_name, modified_time,
                CAST(julianday('now') - julianday(modified_time) AS REAL) days_since_update
         FROM v_leads
-        WHERE is_converted = 0
+        WHERE {pool}
           AND (lead_status IS NULL OR lead_status NOT IN ({status_list})){w}
-    """, list(DEAD_STATUSES) + p)
+    """, pool_params + list(DEAD_STATUSES) + p)
 
     scored = []
     for lead in live:

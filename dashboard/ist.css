@@ -70,3 +70,49 @@
 .segment-result .seg-warn { color: var(--warn); font-size: 0.8rem; margin-top: 0.3rem; }
 .segment-result .seg-error { color: #b91c1c; }
 @media (prefers-color-scheme: dark) { .segment-result .seg-error { color: #f87171; } }
+
+/* --- Merged in from the Weekly Review: movement summary, what moved,
+   needs-attention tabs. --bad follows the theme toggle as well as the OS. */
+:root { --bad: #b91c1c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bad: #f87171; } }
+:root[data-theme="dark"] { --bad: #f87171; }
+
+.move-summary { display: flex; gap: 1.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
+.move-summary div { font-size: 0.78rem; color: var(--text-muted); }
+.move-summary strong { display: block; font-size: 1.35rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+
+.move-list { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; }
+.move-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 0.5rem 0.55rem; border-bottom: 1px solid var(--border);
+}
+.move-row:last-child { border-bottom: none; }
+.move-name { font-weight: 600; }
+.move-path { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; }
+.move-path .arrow { margin: 0 5px; }
+.move-amt { font-size: 0.76rem; color: var(--text-muted); font-variant-numeric: tabular-nums; margin-top: 3px; }
+
+.mtag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; font-weight: 600; padding: 0.12rem 0.55rem;
+  border-radius: 999px; background: var(--accent-soft); color: var(--text);
+}
+.mtag .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.mtag.won .dot { background: var(--good); }
+.mtag.lost .dot { background: var(--bad); }
+.mtag.new .dot { background: var(--accent); }
+
+.tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 0.3rem 0 0.7rem; }
+.tab {
+  font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  color: var(--text-muted); background: none;
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.3rem 0.8rem;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.tab:hover { color: var(--accent); border-color: var(--accent-2); }
+.tab[aria-selected="true"] { color: #fff; background: var(--accent); border-color: transparent; }
+.attention { max-height: 380px; overflow-y: auto; }
+.age { font-weight: 700; }
+.age.warn { color: var(--warn); }
+.age.bad { color: var(--bad); }
+.empty { color: var(--text-muted); padding: 1.2rem 0.2rem; }

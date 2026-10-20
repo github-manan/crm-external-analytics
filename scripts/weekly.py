@@ -20,6 +20,8 @@ import os
 import sqlite3
 from datetime import date, datetime, timedelta
 
+import transform
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
 TARGETS_PATH = os.path.join(ROOT, "config", "targets.json")
@@ -66,6 +68,54 @@ def owner_clause(owner, column="owner_name"):
     return "", []
 
 
+# --- "As of" a past week ----------------------------------------------------
+#
+# The live views only know each deal's state today. To show a past week as it
+# looked then, deal state is rebuilt from DealHistory: each deal's latest
+# history row on or before that week's Sunday. Every deal has history (it
+# starts 2025-11-18, the migration), and the last row always matches the live
+# stage. Two limits: owner and pipeline are today's values, and a closing-date
+# edit without a stage change isn't logged, so past closing dates can be
+# slightly off.
+
+def as_of_date(week):
+    """None for the current week (use the live views), else that week's Sunday."""
+    if not week:
+        return None
+    end = week_bounds(week)[1]
+    return None if end >= date.today().isoformat() else end
+
+
+def _history_stage(expr):
+    return expr.replace("json_extract(payload, '$.Stage')", "r.stage_raw")
+
+
+# One ? parameter: the as-of date. Produces a CTE named `asof` shaped like
+# v_deals for the columns the dashboards use.
+DEALS_AS_OF = f"""
+    asof_ranked AS (
+        SELECT h.deal_id, h.stage_raw, h.amount_inr, h.probability,
+               h.closing_date, h.changed_at,
+               ROW_NUMBER() OVER (PARTITION BY h.deal_id
+                                  ORDER BY h.changed_at DESC, h.id DESC) rn
+        FROM v_deal_history h
+        WHERE date(h.changed_at) <= ?
+    ),
+    asof AS (
+        SELECT d.id, d.deal_name, d.owner_name, d.pipeline, d.contact_id,
+               r.stage_raw,
+               {_history_stage(transform.STAGE_CLEAN)} AS stage,
+               {_history_stage(transform.STAGE_ORDER)} AS stage_order,
+               r.amount_inr, r.probability, r.closing_date,
+               r.changed_at AS last_change,
+               r.stage_raw = 'Closed Won' AS is_won,
+               r.stage_raw NOT IN ('Closed Won', 'Closed Lost') AS is_open
+        FROM asof_ranked r
+        JOIN v_deals d ON d.id = r.deal_id
+        WHERE r.rn = 1
+    )"""
+
+
 # --- KPI tiles --------------------------------------------------------------
 
 def kpis(week=None, owner=None):
@@ -93,9 +143,14 @@ def kpis(week=None, owner=None):
                          AND date(converted_date) BETWEEN ? AND ?{w}""", [a, b] + p).get("n", 0)
 
     w, p = owner_clause(owner)
-    pipeline = one(f"""SELECT COUNT(*) n, COALESCE(SUM(amount_inr),0) v,
-                              COALESCE(SUM(amount_inr * COALESCE(probability,0)/100.0),0) wv
-                       FROM v_deals WHERE is_open = 1{w}""", p)
+    as_of = as_of_date(week)
+    pipeline_sql = """SELECT COUNT(*) n, COALESCE(SUM(amount_inr),0) v,
+                             COALESCE(SUM(amount_inr * COALESCE(probability,0)/100.0),0) wv
+                      FROM {src} WHERE is_open = 1{w}"""
+    if as_of:
+        pipeline = one(f"WITH {DEALS_AS_OF} " + pipeline_sql.format(src="asof", w=w), [as_of] + p)
+    else:
+        pipeline = one(pipeline_sql.format(src="v_deals", w=w), p)
 
     won_n, won_v = revenue_in(start, end)
     prev_won_n, prev_won_v = revenue_in(prev_start, prev_end)
@@ -129,9 +184,13 @@ def lead_sources(week=None, owner=None, scope="week"):
         return rows(f"""SELECT COALESCE(lead_source,'(not set)') source, COUNT(*) n
                         FROM v_leads WHERE date(created_time) BETWEEN ? AND ?{w}
                         GROUP BY source ORDER BY n DESC""", [start, end] + p)
+    # All-time for a past week means "every lead created up to that week".
+    as_of = as_of_date(week)
+    created = " AND date(created_time) <= ?" if as_of else ""
     return rows(f"""SELECT COALESCE(lead_source,'(not set)') source, COUNT(*) n
-                    FROM v_leads WHERE 1=1{w}
-                    GROUP BY source ORDER BY n DESC LIMIT 12""", p)
+                    FROM v_leads WHERE 1=1{created}{w}
+                    GROUP BY source ORDER BY n DESC LIMIT 12""",
+                ([as_of] if as_of else []) + p)
 
 
 def journey(week=None, owner=None, scope="all"):
@@ -146,6 +205,10 @@ def journey(week=None, owner=None, scope="all"):
         start, end = week_bounds(week)
         date_filter = " AND date(l.created_time) BETWEEN ? AND ?"
         date_params = [start, end]
+    else:
+        as_of = as_of_date(week)
+        if as_of:
+            return _journey_as_of(as_of, owner)
 
     statuses = ",".join("?" for _ in CONTACTED_STATUSES)
     # EXISTS rather than a LEFT JOIN to v_deals: SQLite won't push the
@@ -169,7 +232,39 @@ def journey(week=None, owner=None, scope="all"):
         FROM v_leads l
         WHERE 1=1{date_filter}{w}
     """, list(CONTACTED_STATUSES) + date_params + p)
+    return _journey_steps(r, scope)
 
+
+def _journey_as_of(as_of, owner):
+    """The standing funnel as it stood at `as_of`: leads created by then,
+    converted by then, with a deal that existed (or was won) by then.
+    "Contacted" uses today's lead status - Zoho keeps no status history -
+    so that one step can read slightly high for an old week."""
+    w, p = owner_clause(owner, "l.owner_name")
+    statuses = ",".join("?" for _ in CONTACTED_STATUSES)
+    converted = "l.is_converted = 1 AND date(l.converted_date) <= ?"
+    r = one(f"""
+        WITH {DEALS_AS_OF}
+        SELECT
+            COUNT(DISTINCT l.id) lead,
+            COUNT(DISTINCT CASE WHEN l.lead_status IN ({statuses}) OR ({converted})
+                                THEN l.id END) contacted,
+            COUNT(DISTINCT CASE WHEN {converted} THEN l.id END) converted,
+            -- IN, not EXISTS: SQLite builds the IN list once; a correlated
+            -- EXISTS re-ran the whole asof CTE per lead (~6s).
+            COUNT(DISTINCT CASE WHEN {converted} AND l.converted_contact_id IN (
+                SELECT contact_id FROM asof
+            ) THEN l.id END) action,
+            COUNT(DISTINCT CASE WHEN {converted} AND l.converted_contact_id IN (
+                SELECT contact_id FROM asof WHERE is_won = 1
+            ) THEN l.id END) won
+        FROM v_leads l
+        WHERE date(l.created_time) <= ?{w}
+    """, [as_of] + list(CONTACTED_STATUSES) + [as_of] * 4 + [as_of] + p)
+    return _journey_steps(r, "all")
+
+
+def _journey_steps(r, scope):
     steps = [("Lead", r.get("lead", 0)), ("Lead Contacted", r.get("contacted", 0)),
              ("Lead Converted", r.get("converted", 0)), ("Lead Action", r.get("action", 0)),
              ("Deal Won", r.get("won", 0))]
@@ -272,9 +367,23 @@ def target(month=None, owner=None):
 
 # --- Attention lists --------------------------------------------------------
 
-def stuck_deals(owner=None, days=STUCK_AFTER_DAYS):
-    """Open deals with no stage change in `days`. The weekly call's action list."""
+def stuck_deals(owner=None, days=STUCK_AFTER_DAYS, week=None):
+    """Open deals with no stage change in `days`. The weekly call's action list.
+    For a past week: deals open at that Sunday, measured from that Sunday."""
     w, p = owner_clause(owner, "d.owner_name")
+    as_of = as_of_date(week)
+    if as_of:
+        return rows(f"""
+            WITH {DEALS_AS_OF}
+            SELECT d.id, d.deal_name, d.stage, d.pipeline, d.owner_name,
+                   d.amount_inr, d.closing_date, d.last_change,
+                   CAST(julianday(?) - julianday(d.last_change) AS INTEGER) days_stuck
+            FROM asof d
+            WHERE d.is_open = 1{w}
+              AND julianday(?) - julianday(d.last_change) >= ?
+            ORDER BY days_stuck DESC
+            LIMIT 50
+        """, [as_of, as_of] + p + [as_of, days])
     return rows(f"""
         SELECT d.id, d.deal_name, d.stage, d.pipeline, d.owner_name,
                d.amount_inr, d.closing_date,
@@ -313,8 +422,22 @@ def slipped_deals(week=None, owner=None):
     """, [start, end] + p)
 
 
-def closing_soon(owner=None, days=CLOSING_SOON_DAYS):
+def closing_soon(owner=None, days=CLOSING_SOON_DAYS, week=None):
     w, p = owner_clause(owner)
+    as_of = as_of_date(week)
+    if as_of:
+        # Closing dates as recorded in history at that Sunday - see the
+        # DEALS_AS_OF note on why these can be slightly off.
+        return rows(f"""
+            WITH {DEALS_AS_OF}
+            SELECT id, deal_name, stage, pipeline, owner_name, amount_inr,
+                   probability, closing_date,
+                   CAST(julianday(closing_date) - julianday(?) AS INTEGER) days_to_close
+            FROM asof
+            WHERE is_open = 1 AND closing_date IS NOT NULL
+              AND closing_date BETWEEN ? AND date(?, ?){w}
+            ORDER BY closing_date
+        """, [as_of, as_of, as_of, as_of, f"+{days} days"] + p)
     return rows(f"""
         SELECT id, deal_name, stage, pipeline, owner_name, amount_inr,
                probability, closing_date,
@@ -333,10 +456,10 @@ def owners():
            ORDER BY owner_name""")]
 
 
-def weeks_available(limit=26):
-    """Recent Mondays, newest first, for the week picker."""
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
+def weeks_available(limit=26, anchor=None):
+    """Recent Mondays, newest first, for the week picker. `anchor` (any date)
+    makes the list end at that week instead of this one."""
+    monday = week_start(anchor)
     return [(monday - timedelta(weeks=i)).isoformat() for i in range(limit)]
 
 

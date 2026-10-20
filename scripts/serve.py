@@ -343,9 +343,9 @@ def ep_weekly_movement(query):
 def ep_weekly_attention(query):
     week, owner = _wk(query)
     return {
-        "stuck": weekly.stuck_deals(owner),
+        "stuck": weekly.stuck_deals(owner, week=week),
         "slipped": weekly.slipped_deals(week, owner),
-        "closing_soon": weekly.closing_soon(owner),
+        "closing_soon": weekly.closing_soon(owner, week=week),
     }
 
 
@@ -357,22 +357,25 @@ def ep_weekly_options(_):
 # --- IST dashboard (replicates a native Zoho CRM Analytics dashboard) -------
 
 def ep_ist_deals_by_stage(query):
-    return {"rows": ist.deals_by_stage(scoped_owner(query))}
+    week, owner = _wk(query)
+    return {"rows": ist.deals_by_stage(owner, week)}
 
 
 def ep_ist_lead_status(query):
-    return {"rows": ist.lead_status(scoped_owner(query))}
+    week, owner = _wk(query)
+    return {"rows": ist.lead_status(owner, week)}
 
 
 def ep_ist_performance(query):
+    week, owner = _wk(query)
     weeks = min(int(query.get("weeks", ["3"])[0]), 26)
-    return {"rows": ist.performance_weeks(weeks, scoped_owner(query))}
+    return {"rows": ist.performance_weeks(weeks, owner, week)}
 
 
 def ep_leads_hot(query):
-    owner = scoped_owner(query)
+    week, owner = _wk(query)
     limit = min(int(query.get("limit", ["20"])[0]), 100)
-    return {"rows": leads.hot_leads(owner, limit)}
+    return {"rows": leads.hot_leads(owner, limit, weekly.as_of_date(week))}
 
 
 def ep_segment_diagnostic(query):

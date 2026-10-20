@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CRMSurfr &mdash; IST Dashboard</title>
+<title>CRMSurfr &mdash; Sales Review</title>
 <script>try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="ist.css">
@@ -23,15 +23,17 @@
     <nav class="dash-nav">
       <a href="index.html">Overall</a>
       <a href="weekly.html">Weekly Review</a>
-      <a href="ist.html" class="current">IST Dashboard</a>
+      <a href="ist.html" class="current">Sales Review</a>
       <a href="chat.html">Assistant</a>
     </nav>
-    <h1>IST Dashboard</h1>
-    <p class="subtitle">Replicates the native Zoho CRM Analytics dashboard &middot; rebuilt on our own read-only API</p>
+    <h1>Sales Review</h1>
+    <p class="subtitle" id="subtitle">Loading&hellip;</p>
   </div>
   <div class="topbar-meta">
     <label for="owner" class="card-note" style="margin-right:4px;">Owner</label>
     <select id="owner"><option value="">All Users</option></select>
+    <label for="week" class="card-note" style="margin:0 4px 0 6px;">Week</label>
+    <select id="week"></select>
     <span id="sync-status" class="pill pill-muted">connecting&hellip;</span>
     <button id="notes-toggle" class="pill pill-warn" type="button">About this page</button>
   </div>
@@ -45,7 +47,9 @@
   <ul id="notes-list">
     <li>KPI tiles compare to the <b>previous week</b> here, not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
     <li><b>Deal Movement</b> is split by pipeline here (Consulting/Datasurfr/MSS/Renewal each have different stages) &mdash; the source dashboard blends all four into one axis, which the README explicitly warns against.</li>
-    <li>Lead Journey, Revenue Target and Leads by Source reuse the exact same definitions as the Weekly Review dashboard &mdash; one definition per metric, not a second copy.</li>
+    <li>Started as a copy of the native Zoho "IST Dashboard", then merged with the Weekly Review: every section follows the <b>Week</b> picker.</li>
+    <li>For a past week, deals are shown as they stood that Sunday, rebuilt from deal history. Owner and pipeline are today's values, and closing dates can be slightly off (Zoho only logs them on a stage change).</li>
+    <li><b>Lead status</b> and <b>Hot Leads</b> have no history in Zoho: for a past week they cover leads that existed by then, but with today's status and score.</li>
     <li>Zoho's own "Last 3 Months" table is actually 3 weeks by its date ranges &mdash; ours is honestly labeled as weeks.</li>
   </ul>
 </div>
@@ -66,8 +70,8 @@
         <div class="card-controls">
           <label for="source-scope">Scope</label>
           <select id="source-scope">
+            <option value="week" selected>Selected week</option>
             <option value="all">All-time</option>
-            <option value="week">This week</option>
           </select>
         </div>
       </div>
@@ -84,34 +88,66 @@
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-head">
-      <h2>Revenue Target &mdash; This Month</h2>
-      <span class="card-note" id="target-month"></span>
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Revenue Target</h2>
+        <span class="card-note" id="target-month"></span>
+      </div>
+      <div class="target-head">
+        <div class="target-actual" id="target-actual">&mdash;</div>
+        <div class="target-of" id="target-of"></div>
+      </div>
+      <div class="target-track"><div class="target-fill" id="target-fill" style="width:0"></div></div>
+      <div class="target-foot"><span id="target-pct"></span><span id="target-gap"></span></div>
     </div>
-    <div class="target-head">
-      <div class="target-actual" id="target-actual">&mdash;</div>
-      <div class="target-of" id="target-of"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Deal Movement This Week</h2>
+      </div>
+      <p class="card-note">Stage changes recorded between Monday and Sunday.</p>
+      <div class="move-summary" id="move-summary"></div>
     </div>
-    <div class="target-track"><div class="target-fill" id="target-fill" style="width:0"></div></div>
-    <div class="target-foot"><span id="target-pct"></span><span id="target-gap"></span></div>
   </section>
 
   <section class="card">
     <div class="card-head">
-      <h2>Deal Movement</h2>
+      <h2>What Moved</h2>
+      <span class="card-note">Every stage change in the selected week, newest first</span>
+    </div>
+    <div class="move-list" id="move-list"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Needs Attention</h2>
+      <span class="card-note" id="attention-note">The action list for the review call</span>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" type="button" data-tab="stuck" aria-selected="true">Stuck deals</button>
+      <button class="tab" role="tab" type="button" data-tab="slipped" aria-selected="false">Slipped close dates</button>
+      <button class="tab" role="tab" type="button" data-tab="closing" aria-selected="false">Closing in 30 days</button>
+    </div>
+    <div class="table-wrap attention" id="attention"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Deals by Stage</h2>
       <div class="card-controls">
         <label for="stage-pipeline">Pipeline</label>
         <select id="stage-pipeline"></select>
       </div>
     </div>
-    <p class="card-note">All deals by stage (open and closed), for the selected pipeline &mdash; never blended across pipelines.</p>
+    <p class="card-note" id="stage-note">All deals by stage (open and closed), for the selected pipeline &mdash; never blended across pipelines.</p>
     <canvas id="chart-stages" height="160"></canvas>
   </section>
 
   <section class="card">
     <div class="card-head">
-      <h2>Last 3 Weeks Performance Monitor</h2>
+      <h2>3-Week Performance Monitor</h2>
+      <span class="card-note">Ending with the selected week</span>
     </div>
     <div class="table-wrap">
       <table id="perf-table">
@@ -124,6 +160,7 @@
   <section class="card">
     <div class="card-head">
       <h2>Leads by Lead Status</h2>
+      <span class="card-note" id="status-note"></span>
     </div>
     <canvas id="chart-status" height="170"></canvas>
   </section>
@@ -131,7 +168,7 @@
   <section class="card">
     <div class="card-head">
       <h2>Hot Leads</h2>
-      <span class="card-note">Respects the Owner filter above</span>
+      <span class="card-note" id="hot-note">Respects the Owner filter above</span>
     </div>
     <p class="card-note">Heuristic score (recency + historical source/industry conversion rate), not a prediction &mdash; see <a href="chat.html">Assistant</a> for the same scoring with more detail per lead.</p>
     <div class="table-wrap">

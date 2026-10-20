@@ -1,6 +1,7 @@
-// IST Dashboard - replicates a native Zoho CRM Analytics dashboard using our
-// own read-only API. GET only; never writes to Zoho. See ist.py for the
-// "what's replicated vs. redefined" notes behind each section.
+// Sales Review - began as a copy of the native Zoho "IST Dashboard", then
+// absorbed the Weekly Review (week picker, what moved, needs attention).
+// GET only; never writes to Zoho. See ist.py for the "what's replicated vs.
+// redefined" notes, and weekly.py's DEALS_AS_OF for how past weeks work.
 
 const PALETTE = ['#1d4ed8', '#0891b2', '#d97706', '#7c3aed', '#dc2626', '#059669',
                  '#be185d', '#65a30d', '#0284c7', '#ca8a04', '#9333ea', '#0d9488'];
@@ -24,7 +25,8 @@ Chart.defaults.elements.line.borderWidth = 2.5;
 Chart.defaults.elements.bar.borderRadius = 6;
 Chart.defaults.elements.bar.borderSkipped = false;
 
-const state = { owner: '' };
+const state = { owner: '', week: null, currentWeek: null, tab: 'stuck', attention: null, stageRows: [] };
+const isPastWeek = () => state.week && state.week !== state.currentWeek;
 
 function fmtCr(inr) {
   if (inr === null || inr === undefined) return '—';
@@ -45,12 +47,35 @@ function delta(pct) {
          ` <span class="card-note">vs last week</span>`;
 }
 
+// Every call carries the Owner and Week filters; endpoints that don't use
+// one simply ignore it.
 async function getJSON(path) {
+  const params = [];
+  if (state.owner) params.push(`owner=${encodeURIComponent(state.owner)}`);
+  if (state.week) params.push(`week=${encodeURIComponent(state.week)}`);
   const sep = path.includes('?') ? '&' : '?';
-  const url = state.owner ? `${path}${sep}owner=${encodeURIComponent(state.owner)}` : path;
+  const url = params.length ? `${path}${sep}${params.join('&')}` : path;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
   return res.json();
+}
+
+function shortDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function weekLabel(startISO) {
+  const start = new Date(startISO + 'T00:00:00');
+  const end = new Date(start); end.setDate(end.getDate() + 6);
+  const opts = { day: 'numeric', month: 'short' };
+  return `${start.toLocaleDateString('en-IN', opts)} – ${end.toLocaleDateString('en-IN', opts)}`;
+}
+
+// Sunday of the selected week - the "as of" date for past-week views.
+function weekEnd() {
+  const d = new Date(state.week + 'T00:00:00'); d.setDate(d.getDate() + 6);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function baseGrid(axis) {
@@ -63,7 +88,7 @@ async function initTopbar() {
   const statusEl = document.getElementById('sync-status');
   try {
     const meta = await fetch('/api/meta').then(r => r.json());
-    const lastSync = meta.last_sync?.[0]?.last_run_at;
+    const lastSync = meta.last_sync?.map((r) => r.last_run_at).sort().pop();
     statusEl.textContent = lastSync
       ? `synced ${new Date(lastSync).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
       : 'connected';
@@ -103,8 +128,108 @@ async function loadKPIs() {
   setKPI(3, fmtInt(k.accounts.value), delta(k.accounts.delta_pct));
 
   renderTarget(t);
-  return m;
+  renderMoveSummary(m);
 }
+
+// ---------- Deal movement this week (summary + what moved) ----------
+
+function renderMoveSummary(m) {
+  const cells = [
+    ['New in pipeline', m.entered_pipeline, ''],
+    ['Progressed', m.progressed, ''],
+    ['Won', m.closed_won, fmtCr(m.won_value)],
+    ['Lost', m.closed_lost, fmtCr(m.lost_value)],
+  ];
+  document.getElementById('move-summary').innerHTML = cells.map(([label, n, sub]) =>
+    `<div><strong>${fmtInt(n)}</strong>${esc(label)}${sub ? ` &middot; ${sub}` : ''}</div>`).join('');
+}
+
+async function loadMovement() {
+  const { rows } = await getJSON('/api/weekly/movement');
+  const el = document.getElementById('move-list');
+  if (!rows.length) { el.innerHTML = '<div class="empty">No stage changes this week.</div>'; return; }
+  el.innerHTML = rows.map((r) => {
+    let cls = 'moved', label = 'Moved';
+    if (!r.from_stage) { cls = 'new'; label = 'New'; }
+    else if (r.to_stage === 'Closed Won') { cls = 'won'; label = 'Won'; }
+    else if (String(r.to_stage).startsWith('Closed Lost')) { cls = 'lost'; label = 'Lost'; }
+    const path = r.from_stage
+      ? `${esc(r.from_stage)}<span class="arrow">→</span>${esc(r.to_stage)}`
+      : `entered at ${esc(r.to_stage)}`;
+    return `<div class="move-row">
+      <div>
+        <div class="move-name">${esc(r.deal_name)}</div>
+        <div class="move-path">${path}</div>
+      </div>
+      <div style="text-align:right">
+        <span class="mtag ${cls}"><span class="dot"></span>${label}</span>
+        <div class="move-amt">${fmtCr(r.amount_inr)} &middot; ${esc(r.owner_name ?? '—')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- Needs attention ----------
+
+function renderAttention() {
+  const el = document.getElementById('attention');
+  const a = state.attention;
+  if (!a) return;
+
+  if (state.tab === 'stuck') {
+    const rows = a.stuck;
+    if (!rows.length) return void (el.innerHTML = '<div class="empty">Nothing stuck. Every open deal moved in the last 21 days.</div>');
+    el.innerHTML = `<table><thead><tr>
+        <th>Deal</th><th>Stage</th><th>Owner</th>
+        <th class="num">Value</th><th class="num">Days since it moved</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td>${esc(r.deal_name)}</td><td>${esc(r.stage)}</td><td>${esc(r.owner_name ?? '—')}</td>
+        <td class="num">${fmtCr(r.amount_inr)}</td>
+        <td class="num age ${r.days_stuck >= 90 ? 'bad' : r.days_stuck >= 45 ? 'warn' : ''}">${r.days_stuck ?? '—'}</td>
+      </tr>`).join('')}</tbody></table>`;
+
+  } else if (state.tab === 'slipped') {
+    const rows = a.slipped;
+    if (!rows.length) return void (el.innerHTML = '<div class="empty">No close dates pushed out this week.</div>');
+    el.innerHTML = `<table><thead><tr>
+        <th>Deal</th><th>Stage</th><th>Owner</th>
+        <th class="num">Was</th><th class="num">Now</th><th class="num">Slipped</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td>${esc(r.deal_name)}</td><td>${esc(r.stage)}</td><td>${esc(r.owner_name ?? '—')}</td>
+        <td class="num">${shortDate(r.was)}</td><td class="num">${shortDate(r.now)}</td>
+        <td class="num age ${r.slipped_days >= 30 ? 'bad' : 'warn'}">+${r.slipped_days}d</td>
+      </tr>`).join('')}</tbody></table>`;
+
+  } else {
+    const rows = a.closing_soon;
+    if (!rows.length) return void (el.innerHTML = '<div class="empty">Nothing scheduled to close in the next 30 days.</div>');
+    el.innerHTML = `<table><thead><tr>
+        <th>Deal</th><th>Stage</th><th>Owner</th>
+        <th class="num">Value</th><th class="num">Prob.</th><th class="num">Closes</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td>${esc(r.deal_name)}</td><td>${esc(r.stage)}</td><td>${esc(r.owner_name ?? '—')}</td>
+        <td class="num">${fmtCr(r.amount_inr)}</td>
+        <td class="num">${r.probability ?? '—'}%</td>
+        <td class="num">${shortDate(r.closing_date)} <span class="card-note">(${r.days_to_close}d)</span></td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+}
+
+async function loadAttention() {
+  state.attention = await getJSON('/api/weekly/attention');
+  document.getElementById('attention-note').textContent = isPastWeek()
+    ? `Stuck and closing-soon as they stood on ${weekEnd()}`
+    : 'The action list for the review call';
+  renderAttention();
+}
+
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
+    state.tab = btn.dataset.tab;
+    renderAttention();
+  });
+});
 
 // ---------- Revenue target ----------
 
@@ -192,16 +317,24 @@ function renderStages(rows, pipeline) {
   });
 }
 
+// Rows live in state so the pipeline dropdown always draws the latest
+// fetch - a handler holding the first fetch's rows kept showing the
+// original owner's data after the Owner filter changed.
+const stageSel = document.getElementById('stage-pipeline');
+stageSel.addEventListener('change', () => renderStages(state.stageRows, stageSel.value));
+
 async function loadStages() {
   const { rows } = await getJSON('/api/ist/deals_by_stage');
+  state.stageRows = rows;
   const pipelines = [...new Set(rows.map(r => r.pipeline))].sort();
-  const sel = document.getElementById('stage-pipeline');
-  if (!sel.dataset.filled) {
-    sel.innerHTML = pipelines.map(p => `<option value="${p}">${p}</option>`).join('');
-    sel.dataset.filled = '1';
-    sel.addEventListener('change', () => renderStages(rows, sel.value));
-  }
-  renderStages(rows, sel.value || pipelines[0]);
+  const keep = pipelines.includes(stageSel.value) ? stageSel.value : pipelines[0];
+  stageSel.innerHTML = pipelines.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  stageSel.value = keep ?? '';
+  document.getElementById('stage-note').textContent = (isPastWeek()
+    ? `Every deal's stage as of ${weekEnd()}, rebuilt from deal history`
+    : 'All deals by stage (open and closed)') +
+    ', for the selected pipeline — never blended across pipelines.';
+  renderStages(rows, keep);
 }
 
 // ---------- Last 3 weeks performance monitor ----------
@@ -234,6 +367,8 @@ async function loadPerformance() {
 let statusChart;
 async function loadLeadStatus() {
   const { rows } = await getJSON('/api/ist/lead_status');
+  document.getElementById('status-note').textContent = isPastWeek()
+    ? `Leads created by ${weekEnd()}, with today's status (Zoho keeps no status history)` : '';
   const ctx = document.getElementById('chart-status');
   statusChart?.destroy();
   statusChart = new Chart(ctx, {
@@ -262,14 +397,31 @@ function ownerLabel(name) {
   return NON_INDIVIDUAL_OWNERS.has(name) ? `${name} (not an individual — bulk/default queue)` : name;
 }
 
-async function initOwnerFilter() {
-  const { owners } = await getJSON('/api/weekly/options');
+async function initFilters() {
+  const { owners, weeks, current_week } = await getJSON('/api/weekly/options');
+  state.week = state.currentWeek = current_week;
+
   const sel = document.getElementById('owner');
-  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${o}">${ownerLabel(o)}</option>`).join('');
+  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${esc(o)}">${esc(ownerLabel(o))}</option>`).join('');
   sel.addEventListener('change', async () => {
     state.owner = sel.value;
     await loadAll();
   });
+
+  const weekSel = document.getElementById('week');
+  weekSel.innerHTML = weeks.map((w, i) =>
+    `<option value="${w}">${weekLabel(w)}${i === 0 ? ' (this week)' : ''}</option>`).join('');
+  weekSel.value = current_week;
+  weekSel.addEventListener('change', async () => {
+    state.week = weekSel.value;
+    await loadAll();
+  });
+}
+
+function renderSubtitle() {
+  const who = state.owner ? ownerLabel(state.owner) : 'all reps';
+  document.getElementById('subtitle').textContent =
+    `${weekLabel(state.week)}${isPastWeek() ? '' : ' (this week)'} · ${who}`;
 }
 
 document.getElementById('source-scope').addEventListener('change', (e) => loadSources(e.target.value));
@@ -278,6 +430,8 @@ document.getElementById('source-scope').addEventListener('change', (e) => loadSo
 
 async function loadHotLeads() {
   const { rows } = await getJSON('/api/leads/hot?limit=15');
+  document.getElementById('hot-note').textContent = isPastWeek()
+    ? `Leads still open on ${weekEnd()} · scored as of today` : 'Respects the Owner filter above';
   const tbody = document.querySelector('#hot-leads-table tbody');
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No open leads to score for this owner.</td></tr>';
@@ -335,8 +489,13 @@ document.getElementById('segment-value').addEventListener('keydown', (e) => { if
 // ---------- orchestration ----------
 
 async function loadAll() {
-  await Promise.all([
+  renderSubtitle();
+  // allSettled, not all: one failing section shouldn't leave every other
+  // section stuck on its loading state.
+  const results = await Promise.allSettled([
     loadKPIs(),
+    loadMovement(),
+    loadAttention(),
     loadJourney(),
     loadSources(document.getElementById('source-scope').value),
     loadStages(),
@@ -344,6 +503,12 @@ async function loadAll() {
     loadLeadStatus(),
     loadHotLeads(),
   ]);
+  const failed = results.filter((r) => r.status === 'rejected');
+  failed.forEach((r) => console.error(r.reason));
+  if (failed.length) {
+    document.getElementById('sync-status').textContent =
+      `${failed.length} section${failed.length === 1 ? '' : 's'} failed to load — see console`;
+  }
 }
 
 async function main() {
@@ -352,7 +517,7 @@ async function main() {
 
   const ok = await initTopbar();
   if (!ok) return;
-  await initOwnerFilter();
+  await initFilters();
 
   if (!session.is_admin) {
     // The server always scopes every endpoint on this page to the

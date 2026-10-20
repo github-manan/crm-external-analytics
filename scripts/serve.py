@@ -307,6 +307,14 @@ def ep_query(query):
 # --- Weekly dashboard -------------------------------------------------------
 
 def _wk(query):
+    """(period, owner). The period is ?start=&end= (From/To picker) when
+    both are given, else ?week= - see weekly.week_bounds for both forms."""
+    start, end = query.get("start", [None])[0], query.get("end", [None])[0]
+    if start and end:
+        try:
+            return weekly.make_period(start, end), scoped_owner(query)
+        except ValueError:
+            pass  # malformed dates: fall back to the week, never a 500
     return query.get("week", [None])[0], scoped_owner(query)
 
 
@@ -324,7 +332,7 @@ def ep_weekly_journey(query):
     # Doesn't name any individual (just funnel counts), so - unlike the
     # other weekly/* endpoints - this one honors the company-wide toggle
     # too (the Overall page's Total Leads / conversion KPI tiles use it).
-    week = query.get("week", [None])[0]
+    week, _ = _wk(query)
     owner = scoped_owner_optional(query)
     return weekly.journey(week, owner, query.get("scope", ["all"])[0])
 

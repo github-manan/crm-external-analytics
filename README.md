@@ -66,19 +66,20 @@ steps, so change them there, not per chart.
 | `/api/weekly/options` | owner list, selectable weeks, current week |
 | `/api/weekly/summary` | KPI tiles, movement summary, target vs actual |
 | `/api/weekly/journey` | Lead -> Contacted -> Converted -> Action -> Won |
-| `/api/weekly/sources` | leads by source for the week (`?scope=all` for all-time) |
-| `/api/weekly/movement` | every stage change that week, from -> to |
+| `/api/weekly/sources` | leads by source for the period (`?scope=all` for all-time) |
+| `/api/weekly/movement` | every stage change in the period, from -> to |
 | `/api/weekly/attention` | stuck deals, slipped close dates, closing in 30 days |
 | `/api/ist/deals_by_stage` | deals per stage, per pipeline |
-| `/api/ist/performance` | 3-week table ending at the selected week |
+| `/api/ist/performance` | 3-week table ending with the period's last week |
 | `/api/ist/lead_status` | leads by lead status |
 | `/api/leads/hot` | heuristic hot-lead score |
 
-All take `?week=YYYY-MM-DD` (any date in the week) and `?owner=<name>`.
-For a past week, deal state (pipeline, stages, stuck, closing soon) is
-rebuilt from deal history as of that Sunday - see `DEALS_AS_OF` in
+All take `?owner=<name>` and a period: either `?start=YYYY-MM-DD&end=YYYY-MM-DD`
+(the page's From/To picker) or `?week=YYYY-MM-DD` (that date's Monday-Sunday week).
+KPI deltas compare against the same-length period just before. For a past period, deal state (pipeline, stages, stuck, closing soon) is
+rebuilt from deal history as of its last day - see `DEALS_AS_OF` in
 `scripts/weekly.py`. Lead status and hot-lead scores have no history in
-Zoho, so for a past week they use today's values for the leads that existed
+Zoho, so for a past period they use today's values for the leads that existed
 then; the page labels this.
 
 **Revenue targets live in `config/targets.json`**, not the CRM - Zoho holds no

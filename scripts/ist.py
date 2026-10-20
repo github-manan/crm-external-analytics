@@ -68,7 +68,8 @@ CLOSED_STAGES = ("Closed Won", "Closed Lost", "Closed Lost to Competition")
 def performance_weeks(n=3, owner=None, week=None):
     """Oldest -> newest, left to right, matching how the source table reads.
     The last column is `week` (default: this week)."""
-    week_starts = list(reversed(weekly.weeks_available(limit=n, anchor=week)))
+    anchor = week_bounds(week)[1] if week else None  # the week the period ends in
+    week_starts = list(reversed(weekly.weeks_available(limit=n, anchor=anchor)))
     out = []
     for wk in week_starts:
         start, end = week_bounds(wk)

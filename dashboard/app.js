@@ -612,6 +612,29 @@ async function main() {
   }
 
   await loadDataQuality();
+
+  // One refresh button per card, each re-reading only that card's data.
+  const card = (id) => document.getElementById(id);
+  const fetchRows = async (path) => (await getJSON(withView(path))).rows;
+  const refreshKPIs = async () => {
+    const [fiscal, pipelines] = await Promise.all([fetchRows('/api/bookings/fiscal'), fetchRows('/api/pipelines')]);
+    await loadKPIs(pipelines, fiscal, meta);
+  };
+  document.querySelectorAll('.kpi-card').forEach((tile) => addRefresh(tile, refreshKPIs));
+  addRefresh(card('chart-fiscal'), async () => renderFiscalChart(await fetchRows('/api/bookings/fiscal')));
+  addRefresh(card('chart-pipelines'), async () => renderPipelinesChart(await fetchRows('/api/pipelines')));
+  addRefresh(card('chart-monthly'), () => loadMonthlyChart(card('pipeline-filter').value));
+  addRefresh(card('chart-stages'), async () => {
+    const rows = await fetchRows('/api/pipeline/open');
+    const stageFilter = card('stage-pipeline-filter');
+    stageFilter.onchange = () => loadStagesChart(stageFilter.value, rows); // keep the dropdown on the fresh rows
+    await loadStagesChart(stageFilter.value, rows);
+  });
+  addRefresh(card('chart-seasonality'), async () => renderSeasonalityChart(await fetchRows('/api/seasonality')));
+  addRefresh(card('chart-history'), async () => renderHistoryChart(await fetchRows('/api/pipeline/history')));
+  addRefresh(card('reps-table'), () => Promise.all([loadRepsTable(fyFilter.value), refreshRepTrend()]));
+  if (session.is_admin) addRefresh(card('activity-table'), () => loadUserActivity(card('activity-filter').value));
+  addRefresh(card('dq-table'), loadDataQuality);
 }
 
 main().catch(err => {

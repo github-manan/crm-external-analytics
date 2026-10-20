@@ -57,8 +57,25 @@ def week_start(value=None):
 
 
 def week_bounds(value=None):
+    """(start, end) ISO dates of a period. `value` is either any date - its
+    Monday-Sunday week - or an explicit range "YYYY-MM-DD..YYYY-MM-DD" (the
+    dashboard's From/To picker; see make_period). Every function here that
+    takes a `week` accepts either form."""
+    if isinstance(value, str) and ".." in value:
+        start, end = value.split("..", 1)
+        return start, end
     start = week_start(value)
     return start.isoformat(), (start + timedelta(days=6)).isoformat()
+
+
+def make_period(start, end):
+    """Validated "start..end" period string. Raises ValueError on a bad
+    date; swaps the two if they're reversed."""
+    a = datetime.strptime(start, "%Y-%m-%d").date()
+    b = datetime.strptime(end, "%Y-%m-%d").date()
+    if a > b:
+        a, b = b, a
+    return f"{a.isoformat()}..{b.isoformat()}"
 
 
 def owner_clause(owner, column="owner_name"):
@@ -120,8 +137,12 @@ DEALS_AS_OF = f"""
 
 def kpis(week=None, owner=None):
     start, end = week_bounds(week)
-    prev_start = (datetime.strptime(start, "%Y-%m-%d").date() - timedelta(days=7)).isoformat()
-    prev_end = (datetime.strptime(start, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+    # The comparison period is the same length, immediately before - the
+    # previous week for a week, the previous 30 days for a 30-day range.
+    first = datetime.strptime(start, "%Y-%m-%d").date()
+    days = (datetime.strptime(end, "%Y-%m-%d").date() - first).days + 1
+    prev_start = (first - timedelta(days=days)).isoformat()
+    prev_end = (first - timedelta(days=1)).isoformat()
 
     def leads_in(a, b):
         w, p = owner_clause(owner)
@@ -340,7 +361,10 @@ def load_targets():
 
 
 def target(month=None, owner=None):
-    """Revenue target vs actual for the month containing `month`."""
+    """Revenue target vs actual for the month containing `month` - for a
+    date range, the month its last day falls in (targets are monthly)."""
+    if month and ".." in month:
+        month = week_bounds(month)[1]
     month = (month or date.today().isoformat())[:7]
     cfg = load_targets()
     if owner and owner != "All":

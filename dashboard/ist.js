@@ -1,12 +1,19 @@
 // IST Dashboard - began as a copy of the native Zoho "IST Dashboard", then
-// absorbed the Weekly Review (week picker, what moved, needs attention).
+// absorbed the Weekly Review (what moved, needs attention). Every section
+// follows the Period filter: a preset or any From/To dates.
 // GET only; never writes to Zoho. See ist.py for the "what's replicated vs.
-// redefined" notes, and weekly.py's DEALS_AS_OF for how past weeks work.
+// redefined" notes, and weekly.py's DEALS_AS_OF for how past periods work.
 
 // Chart colors, defaults and baseGrid() come from charts.js.
 
-const state = { owner: '', week: null, currentWeek: null, tab: 'stuck', attention: null, stageRows: [] };
-const isPastWeek = () => state.week && state.week !== state.currentWeek;
+const state = { owner: '', start: null, end: null, tab: 'stuck', attention: null, stageRows: [] };
+
+// Local-date ISO (YYYY-MM-DD) - toISOString() would shift to UTC and land
+// on the previous day for most of the IST morning.
+const isoDate = (d) => d.toLocaleDateString('en-CA');
+const todayISO = () => isoDate(new Date());
+// A period that ended before today: deal state is rebuilt "as of" its end.
+const isPast = () => state.end < todayISO();
 
 function fmtCr(inr) {
   if (inr === null || inr === undefined) return '—';
@@ -20,22 +27,24 @@ function fmtInt(n) { return (n ?? 0).toLocaleString('en-IN'); }
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function delta(pct) {
-  if (pct === null || pct === undefined) return '<span class="delta flat">no prior week</span>';
-  if (pct === 0) return '<span class="delta flat">flat vs last week</span>';
+  if (pct === null || pct === undefined) return '<span class="delta flat">no prior period</span>';
+  if (pct === 0) return '<span class="delta flat">flat vs previous period</span>';
   const up = pct > 0;
   return `<span class="delta ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${Math.abs(pct)}%</span>` +
-         ` <span class="card-note">vs last week</span>`;
+         ` <span class="card-note">vs previous period</span>`;
 }
 
-// Every call carries the Owner and Week filters; endpoints that don't use
+// Every call carries the Owner and Period filters; endpoints that don't use
 // one simply ignore it.
 async function getJSON(path) {
   const params = [];
   if (state.owner) params.push(`owner=${encodeURIComponent(state.owner)}`);
-  if (state.week) params.push(`week=${encodeURIComponent(state.week)}`);
+  if (state.start && state.end) params.push(`start=${state.start}`, `end=${state.end}`);
   const sep = path.includes('?') ? '&' : '?';
   const url = params.length ? `${path}${sep}${params.join('&')}` : path;
-  const res = await fetch(url);
+  // Tied to the current load (see loadAll): a newer filter change aborts
+  // this request, so a slow old response can never overwrite a newer one.
+  const res = await fetch(url, { signal: state.controller?.signal });
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
   return res.json();
 }
@@ -45,17 +54,20 @@ function shortDate(iso) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
-function weekLabel(startISO) {
-  const start = new Date(startISO + 'T00:00:00');
-  const end = new Date(start); end.setDate(end.getDate() + 6);
-  const opts = { day: 'numeric', month: 'short' };
-  return `${start.toLocaleDateString('en-IN', opts)} – ${end.toLocaleDateString('en-IN', opts)}`;
+function fmtDay(iso, withYear = false) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN',
+    withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
 }
 
-// Sunday of the selected week - the "as of" date for past-week views.
-function weekEnd() {
-  const d = new Date(state.week + 'T00:00:00'); d.setDate(d.getDate() + 6);
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+function periodLabel() {
+  if (state.start === state.end) return fmtDay(state.start, true);
+  const sameYear = state.start.slice(0, 4) === state.end.slice(0, 4);
+  return `${fmtDay(state.start, !sameYear)} – ${fmtDay(state.end, true)}`;
+}
+
+// Last day of the period - the "as of" date for past-period views.
+function periodEnd() {
+  return fmtDay(state.end, true);
 }
 
 // ---------- top bar ----------
@@ -107,7 +119,7 @@ async function loadKPIs() {
   renderMoveSummary(m);
 }
 
-// ---------- Deal movement this week (summary + what moved) ----------
+// ---------- Deal movement (summary + what moved) ----------
 
 function renderMoveSummary(m) {
   const cells = [
@@ -123,7 +135,7 @@ function renderMoveSummary(m) {
 async function loadMovement() {
   const { rows } = await getJSON('/api/weekly/movement');
   const el = document.getElementById('move-list');
-  if (!rows.length) { el.innerHTML = '<div class="empty">No stage changes this week.</div>'; return; }
+  if (!rows.length) { el.innerHTML = '<div class="empty">No stage changes in this period.</div>'; return; }
   el.innerHTML = rows.map((r) => {
     let cls = 'moved', label = 'Moved';
     if (!r.from_stage) { cls = 'new'; label = 'New'; }
@@ -166,7 +178,7 @@ function renderAttention() {
 
   } else if (state.tab === 'slipped') {
     const rows = a.slipped;
-    if (!rows.length) return void (el.innerHTML = '<div class="empty">No close dates pushed out this week.</div>');
+    if (!rows.length) return void (el.innerHTML = '<div class="empty">No close dates pushed out in this period.</div>');
     el.innerHTML = `<table><thead><tr>
         <th>Deal</th><th>Stage</th><th>Owner</th>
         <th class="num">Was</th><th class="num">Now</th><th class="num">Slipped</th></tr></thead><tbody>
@@ -193,8 +205,8 @@ function renderAttention() {
 
 async function loadAttention() {
   state.attention = await getJSON('/api/weekly/attention');
-  document.getElementById('attention-note').textContent = isPastWeek()
-    ? `Stuck and closing-soon as they stood on ${weekEnd()}`
+  document.getElementById('attention-note').textContent = isPast()
+    ? `Stuck and closing-soon as they stood on ${periodEnd()}`
     : 'The action list for the review call';
   renderAttention();
 }
@@ -250,7 +262,7 @@ async function loadSources(scope) {
   const { rows } = await getJSON(`/api/weekly/sources?scope=${scope}`);
   const el = document.getElementById('source-list');
   if (!rows.length) {
-    el.innerHTML = `<div class="empty">No leads created ${scope === 'week' ? 'in the selected week' : 'yet'}.</div>`;
+    el.innerHTML = `<div class="empty">No leads created ${scope === 'week' ? 'in this period' : 'yet'}.</div>`;
     return;
   }
   // Ranked bars, top 10 + "Other": one hue, so length carries the
@@ -311,8 +323,8 @@ async function loadStages() {
   const keep = pipelines.includes(stageSel.value) ? stageSel.value : pipelines[0];
   stageSel.innerHTML = pipelines.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   stageSel.value = keep ?? '';
-  document.getElementById('stage-note').textContent = (isPastWeek()
-    ? `Every deal's stage as of ${weekEnd()}, rebuilt from deal history`
+  document.getElementById('stage-note').textContent = (isPast()
+    ? `Every deal's stage as of ${periodEnd()}, rebuilt from deal history`
     : 'All deals by stage (open and closed)') +
     ', for the selected pipeline — never blended across pipelines.';
   renderStages(rows, keep);
@@ -348,8 +360,8 @@ async function loadPerformance() {
 let statusChart;
 async function loadLeadStatus() {
   const { rows } = await getJSON('/api/ist/lead_status');
-  document.getElementById('status-note').textContent = isPastWeek()
-    ? `Leads created by ${weekEnd()}, with today's status (Zoho keeps no status history)` : '';
+  document.getElementById('status-note').textContent = isPast()
+    ? `Leads created by ${periodEnd()}, with today's status (Zoho keeps no status history)` : '';
   const ctx = document.getElementById('chart-status');
   fitBarHeight(ctx, rows.length, 22);
   statusChart?.destroy();
@@ -380,9 +392,27 @@ function ownerLabel(name) {
   return NON_INDIVIDUAL_OWNERS.has(name) ? `${name} (not an individual — bulk/default queue)` : name;
 }
 
+// Period presets -> [start, end] as local dates. Weeks run Monday to Sunday
+// and the fiscal year April to March, matching the rest of the app.
+function presetRange(preset) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const day = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const monday = day(t, -((t.getDay() + 6) % 7));
+  switch (preset) {
+    case 'last-week': return [day(monday, -7), day(monday, -1)];
+    case 'this-month': return [new Date(t.getFullYear(), t.getMonth(), 1), new Date(t.getFullYear(), t.getMonth() + 1, 0)];
+    case 'last-month': return [new Date(t.getFullYear(), t.getMonth() - 1, 1), new Date(t.getFullYear(), t.getMonth(), 0)];
+    case 'last-90': return [day(t, -89), t];
+    case 'this-fy': {
+      const fyStart = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+      return [new Date(fyStart, 3, 1), new Date(fyStart + 1, 2, 31)];
+    }
+    default: return [monday, day(monday, 6)]; // this-week
+  }
+}
+
 async function initFilters() {
-  const { owners, weeks, current_week } = await getJSON('/api/weekly/options');
-  state.week = state.currentWeek = current_week;
+  const { owners } = await getJSON('/api/weekly/options');
 
   const sel = document.getElementById('owner');
   sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${esc(o)}">${esc(ownerLabel(o))}</option>`).join('');
@@ -391,20 +421,42 @@ async function initFilters() {
     await loadAll();
   });
 
-  const weekSel = document.getElementById('week');
-  weekSel.innerHTML = weeks.map((w, i) =>
-    `<option value="${w}">${weekLabel(w)}${i === 0 ? ' (this week)' : ''}</option>`).join('');
-  weekSel.value = current_week;
-  weekSel.addEventListener('change', async () => {
-    state.week = weekSel.value;
+  const periodSel = document.getElementById('period');
+  const from = document.getElementById('date-from');
+  const to = document.getElementById('date-to');
+  const applyPreset = () => {
+    const [a, b] = presetRange(periodSel.value);
+    state.start = from.value = isoDate(a);
+    state.end = to.value = isoDate(b);
+  };
+  applyPreset();
+
+  periodSel.addEventListener('change', async () => {
+    if (periodSel.value === 'custom') { from.focus(); return; }
+    applyPreset();
     await loadAll();
   });
+  // Picking a date switches the preset to "Custom range". Only a complete
+  // pair reloads; From after To is swapped rather than rejected.
+  // Debounced, so setting From and then To in quick succession is one load.
+  let dateTimer;
+  const onDate = () => {
+    clearTimeout(dateTimer);
+    dateTimer = setTimeout(() => {
+      if (!from.value || !to.value) return;
+      periodSel.value = 'custom';
+      [state.start, state.end] = from.value <= to.value ? [from.value, to.value] : [to.value, from.value];
+      from.value = state.start; to.value = state.end;
+      loadAll();
+    }, 400);
+  };
+  from.addEventListener('change', onDate);
+  to.addEventListener('change', onDate);
 }
 
 function renderSubtitle() {
   const who = state.owner ? ownerLabel(state.owner) : 'all reps';
-  document.getElementById('subtitle').textContent =
-    `${weekLabel(state.week)}${isPastWeek() ? '' : ' (this week)'} · ${who}`;
+  document.getElementById('subtitle').textContent = `${periodLabel()} · ${who}`;
 }
 
 document.getElementById('source-scope').addEventListener('change', (e) => loadSources(e.target.value));
@@ -413,8 +465,8 @@ document.getElementById('source-scope').addEventListener('change', (e) => loadSo
 
 async function loadHotLeads() {
   const { rows } = await getJSON('/api/leads/hot?limit=15');
-  document.getElementById('hot-note').textContent = isPastWeek()
-    ? `Leads still open on ${weekEnd()} · scored as of today` : 'Respects the Owner filter above';
+  document.getElementById('hot-note').textContent = isPast()
+    ? `Leads still open on ${periodEnd()} · scored as of today` : 'Respects the Owner filter above';
   const tbody = document.querySelector('#hot-leads-table tbody');
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No open leads to score for this owner.</td></tr>';
@@ -472,6 +524,8 @@ document.getElementById('segment-value').addEventListener('keydown', (e) => { if
 // ---------- orchestration ----------
 
 async function loadAll() {
+  state.controller?.abort();
+  state.controller = new AbortController();
   renderSubtitle();
   // allSettled, not all: one failing section shouldn't leave every other
   // section stuck on its loading state.
@@ -486,7 +540,8 @@ async function loadAll() {
     loadLeadStatus(),
     loadHotLeads(),
   ]);
-  const failed = results.filter((r) => r.status === 'rejected');
+  // An aborted load was superseded by a newer one - not a failure.
+  const failed = results.filter((r) => r.status === 'rejected' && r.reason?.name !== 'AbortError');
   failed.forEach((r) => console.error(r.reason));
   if (failed.length) {
     document.getElementById('sync-status').textContent =
@@ -513,7 +568,27 @@ async function main() {
     state.owner = session.owner_name;
   }
 
+  initRefreshButtons();
   await loadAll();
+}
+
+// One refresh button per card, each re-running only that card's loader.
+// The KPI tiles, Revenue Target and Deal Movement all come from one
+// summary request, so refreshing any of them redraws all three.
+function initRefreshButtons() {
+  const card = (id) => document.getElementById(id);
+  document.querySelectorAll('.kpi-card').forEach((tile) => addRefresh(tile, loadKPIs));
+  addRefresh(card('target-actual'), loadKPIs);
+  addRefresh(card('move-summary'), loadKPIs);
+  addRefresh(card('source-list'), () => loadSources(card('source-scope').value));
+  addRefresh(card('funnel'), loadJourney);
+  addRefresh(card('move-list'), loadMovement);
+  addRefresh(card('attention'), loadAttention);
+  addRefresh(card('chart-stages'), loadStages);
+  addRefresh(card('perf-table'), loadPerformance);
+  addRefresh(card('chart-status'), loadLeadStatus);
+  addRefresh(card('hot-leads-table'), loadHotLeads);
+  addRefresh(card('segment-result'), () => (card('segment-value').value.trim() ? runSegmentLookup() : Promise.resolve()));
 }
 
 main().catch(err => {

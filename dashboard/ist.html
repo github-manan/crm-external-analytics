@@ -37,10 +37,30 @@
     <p class="subtitle" id="subtitle">Loading&hellip;</p>
   </div>
   <div class="page-filters">
-    <label for="owner">Owner</label>
-    <select id="owner"><option value="">All Users</option></select>
-    <label for="week">Week</label>
-    <select id="week"></select>
+    <span class="filter-group">
+      <label for="owner">Owner</label>
+      <select id="owner"><option value="">All Users</option></select>
+    </span>
+    <span class="filter-group">
+      <label for="period">Period</label>
+      <select id="period">
+        <option value="this-week">This week</option>
+        <option value="last-week">Last week</option>
+        <option value="this-month">This month</option>
+        <option value="last-month">Last month</option>
+        <option value="last-90">Last 90 days</option>
+        <option value="this-fy">This fiscal year</option>
+        <option value="custom">Custom range</option>
+      </select>
+    </span>
+    <span class="filter-group">
+      <label for="date-from">From</label>
+      <input type="date" id="date-from">
+    </span>
+    <span class="filter-group">
+      <label for="date-to">To</label>
+      <input type="date" id="date-to">
+    </span>
   </div>
 </section>
 
@@ -50,11 +70,11 @@
     <button id="notes-close" type="button" aria-label="Close">&times;</button>
   </div>
   <ul id="notes-list">
-    <li>KPI tiles compare to the <b>previous week</b> here, not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
+    <li>KPI tiles compare to the <b>previous period of the same length</b> (e.g. the week before, or the 30 days before), not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
     <li><b>Deal Movement</b> is split by pipeline here (Consulting/Datasurfr/MSS/Renewal each have different stages) &mdash; the source dashboard blends all four into one axis, which the README explicitly warns against.</li>
-    <li>Started as a copy of the native Zoho "IST Dashboard", then merged with the Weekly Review: every section follows the <b>Week</b> picker.</li>
-    <li>For a past week, deals are shown as they stood that Sunday, rebuilt from deal history. Owner and pipeline are today's values, and closing dates can be slightly off (Zoho only logs them on a stage change).</li>
-    <li><b>Lead status</b> and <b>Hot Leads</b> have no history in Zoho: for a past week they cover leads that existed by then, but with today's status and score.</li>
+    <li>Started as a copy of the native Zoho "IST Dashboard", then merged with the Weekly Review: every section follows the <b>Period</b> (pick a preset or any From/To dates).</li>
+    <li>For a period in the past, deals are shown as they stood on its last day, rebuilt from deal history. Owner and pipeline are today's values, and closing dates can be slightly off (Zoho only logs them on a stage change).</li>
+    <li><b>Lead status</b> and <b>Hot Leads</b> have no history in Zoho: for a past period they cover leads that existed by then, but with today's status and score.</li>
     <li>Zoho's own "Last 3 Months" table is actually 3 weeks by its date ranges &mdash; ours is honestly labeled as weeks.</li>
   </ul>
 </div>
@@ -62,10 +82,10 @@
 <main id="app">
 
   <section class="kpi-row" id="kpi-row" aria-label="Key metrics">
-    <div class="kpi-card skeleton"><span class="kpi-label">Leads this week</span><span class="kpi-value">&mdash;</span></div>
-    <div class="kpi-card skeleton"><span class="kpi-label">Revenue this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">New leads</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Revenue won</span><span class="kpi-value">&mdash;</span></div>
     <div class="kpi-card skeleton"><span class="kpi-label">Deals in pipeline</span><span class="kpi-value">&mdash;</span></div>
-    <div class="kpi-card skeleton"><span class="kpi-label">Accounts this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">New accounts</span><span class="kpi-value">&mdash;</span></div>
   </section>
 
   <section class="grid-2">
@@ -75,7 +95,7 @@
         <div class="card-controls">
           <label for="source-scope">Scope</label>
           <select id="source-scope">
-            <option value="week" selected>Selected week</option>
+            <option value="week" selected>Selected period</option>
             <option value="all">All-time</option>
           </select>
         </div>
@@ -108,9 +128,9 @@
 
     <div class="card">
       <div class="card-head">
-        <h2>Deal Movement This Week</h2>
+        <h2>Deal Movement</h2>
       </div>
-      <p class="card-note">Stage changes recorded between Monday and Sunday.</p>
+      <p class="card-note">Stage changes recorded in the selected period.</p>
       <div class="move-summary" id="move-summary"></div>
     </div>
   </section>
@@ -118,7 +138,7 @@
   <section class="card">
     <div class="card-head">
       <h2>What Moved</h2>
-      <span class="card-note">Every stage change in the selected week, newest first</span>
+      <span class="card-note">Every stage change in the selected period, newest first</span>
     </div>
     <div class="move-list" id="move-list"></div>
   </section>
@@ -151,7 +171,7 @@
   <section class="card">
     <div class="card-head">
       <h2>3-Week Performance Monitor</h2>
-      <span class="card-note">Ending with the selected week</span>
+      <span class="card-note">The 3 weeks up to the end of the period</span>
     </div>
     <div class="table-wrap">
       <table id="perf-table">
@@ -220,6 +240,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 <script src="theme.js"></script>
 <script src="charts.js"></script>
+<script src="refresh.js"></script>
 <script src="auth.js"></script>
 <script src="ist.js"></script>
 </body>

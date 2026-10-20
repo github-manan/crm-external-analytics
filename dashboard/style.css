@@ -199,6 +199,16 @@ select, .page-filters select {
   transition: border-color 0.15s var(--ease);
 }
 select:hover { border-color: var(--accent-2); }
+.page-filters input[type="date"] {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.26rem 0.45rem;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.page-filters input[type="date"]:hover { border-color: var(--accent-2); }
 
 /* Pills and small buttons in the top bar */
 .pill {
@@ -274,8 +284,9 @@ main { max-width: 1280px; margin: 0.9rem auto; padding: 0 1.25rem; display: flex
   box-shadow: var(--shadow);
   min-width: 0;
 }
-.card-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin-bottom: 0.3rem; }
-.card-head h2 { margin: 0; font-size: 0.88rem; }
+.card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin-bottom: 0.3rem; }
+/* Title left; notes, controls and the refresh button pack to the right */
+.card-head h2 { margin: 0 auto 0 0; font-size: 0.88rem; }
 .card-note { font-size: 0.74rem; color: var(--text-muted); }
 p.card-note { margin: 0 0 0.6rem; }
 .card-controls { display: flex; align-items: center; gap: 0.4rem; font-size: 0.76rem; color: var(--text-muted); }
@@ -358,7 +369,7 @@ tbody tr:hover { background: var(--surface-2); }
   .dash-nav { order: 3; width: 100%; height: 36px; overflow-x: auto; }
   .topbar-meta { gap: 0.3rem; margin-left: 0; width: 100%; flex-wrap: wrap; order: 2; }
   .page-filters { width: 100%; }
-  .page-filters select { flex: 1 1 40%; max-width: none; }
+  .page-filters select { max-width: none; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
   main, .page-head { padding: 0 1rem; }
 }
@@ -366,3 +377,35 @@ tbody tr:hover { background: var(--surface-2); }
 /* Inline color key inside a card note (e.g. a highlighted subset of bars) */
 .key-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 0.3rem 0 0.15rem; vertical-align: 0; }
 select:disabled { opacity: 0.65; cursor: not-allowed; background: var(--surface-2); }
+
+/* Per-card refresh button (refresh.js) */
+.refresh-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; flex: none;
+  background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--text-muted); cursor: pointer;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+.refresh-btn:hover { color: var(--accent); border-color: var(--border); background: var(--surface-2); }
+.refresh-btn:disabled { cursor: progress; }
+.refresh-btn.spinning svg { animation: spin 0.8s linear infinite; }
+.refresh-btn.failed { color: var(--bad); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .refresh-btn.spinning svg { animation-duration: 2.4s; } }
+/* KPI tiles have no card-head: the button sits in the top-right corner */
+.kpi-card.has-refresh { position: relative; }
+.kpi-card > .refresh-btn { position: absolute; top: 6px; right: 6px; }
+
+/* Card refresh buttons sit in the card's top-right corner, so a long note
+   in the header can't push them onto a line of their own. */
+.card:has(> .card-head > .refresh-btn) { position: relative; }
+.card-head:has(> .refresh-btn) { padding-right: 28px; }
+.card-head > .refresh-btn { position: absolute; top: 0.6rem; right: 0.6rem; }
+
+/* A filter's label and control stay together when the row wraps */
+.filter-group { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (max-width: 640px) {
+  .filter-group { flex: 1 1 100%; min-width: 0; }
+  .filter-group > select, .filter-group > input { flex: 1; min-width: 0; width: 100%; }
+  .page-filters label { margin-left: 0; min-width: 44px; }
+}

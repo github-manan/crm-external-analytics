@@ -506,6 +506,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
+    def end_headers(self):
+        # Without this, browsers cache ist.js/ist.css on their own heuristic
+        # and keep running the old code after a dashboard change. no-cache
+        # still allows caching, it just makes the browser re-check each
+        # load (a cheap 304 when nothing changed).
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def _session_token(self):
         for part in self.headers.get("Cookie", "").split(";"):
             if "=" in part:

@@ -1,4 +1,4 @@
-# Zoho CRM → local data layer
+# MitKat GrowthIQ — Zoho CRM → local data layer
 
 Pulls Zoho CRM into a local SQLite database with typed SQL views on top, so
 dashboards and models can be built without touching the Zoho API or its

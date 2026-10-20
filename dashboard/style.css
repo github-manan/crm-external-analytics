@@ -150,6 +150,7 @@ a { color: var(--accent); }
 .brand-mark { flex: none; display: block; color: var(--accent); }
 .brand-word { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.015em; color: var(--text); }
 .brand-word .brand-accent { color: var(--accent); }
+.brand-word .brand-org { font-weight: 500; color: var(--text-muted); }
 
 .dash-nav { display: flex; align-self: stretch; gap: 0.25rem; }
 .dash-nav a {

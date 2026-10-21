@@ -1,4 +1,4 @@
-"""Local AI assistant over the CRM data - Phase 2 of the original project plan.
+"""AI assistant over the CRM data - Phase 2 of the original project plan.
 
 Design principle (from the project proposal): the model never gets raw
 database access. It only ever sees a fixed set of tools, each one a thin
@@ -6,9 +6,18 @@ wrapper around an already-tested query from weekly.py / ist.py / this
 codebase's own views - the same numbers the dashboards show, nothing a
 model could invent or get wrong by writing bad SQL.
 
-Runs entirely local via Ollama (http://localhost:11434) - no CRM data is
-ever sent to an external LLM provider, per the confirmed project
-constraint. Read-only: nothing here can write to Zoho or to data/crm.db.
+NO MODEL IS CONNECTED RIGHT NOW. The local Ollama model was removed
+(2026-10-21) ahead of a move to Gemini; until that lands, ask() answers
+with ASSISTANT_UNAVAILABLE and calls nothing. Everything model-agnostic is
+kept for the Gemini integration: the tool functions (TOOLS), their schema
+(TOOL_SCHEMA), the system prompt (build_system_prompt), per-user scoping
+(run_tool) and the guaranteed-correct headlines (build_headline).
+
+Note for that move: the Ollama setup kept every CRM figure on this
+machine, per the original "no external LLM provider" constraint. Gemini
+is an external provider - tool results (CRM data) would be sent to Google
+- so that constraint needs an explicit decision before wiring it in.
+Read-only either way: nothing here can write to Zoho or to data/crm.db.
 
 One deliberate exception to "nothing leaves this machine": search_company_background
 sends a company name to DuckDuckGo's public search (no API key, no account,
@@ -21,8 +30,6 @@ no-external-LLM rule, not bundled into it.
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
@@ -35,8 +42,10 @@ import adoption
 import insights
 from ddgs import DDGS
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL = os.environ.get("CHATBOT_MODEL", "llama3.2:3b")
+# Flip to True once the Gemini call is wired into ask().
+MODEL_CONNECTED = False
+ASSISTANT_UNAVAILABLE = ("The Assistant is offline while it moves to a new AI model (Gemini). "
+                         "The IST Dashboard and Overall pages have the same numbers in the meantime.")
 
 TODAY_NOTE = "Dates in this CRM's data run up to whatever the last daily sync captured - use get_weekly_kpis or ask the user for a specific period rather than assuming what 'today' is."
 
@@ -539,15 +548,6 @@ TOOL_SCHEMA = [
 ]
 
 
-def _post(payload):
-    req = urllib.request.Request(
-        OLLAMA_URL, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.load(resp)
-
-
 # --- Headlines: the guaranteed-correct answer, built here in Python -----
 #
 # The model reliably picks the right tool and the right row/verdict now,
@@ -717,23 +717,10 @@ def build_headline(tool_log):
         return None
 
 
-def ask(user_message, history=None, max_tool_rounds=4, session=None, upload=None):
-    """Runs the tool-calling loop. Returns {reply, tool_calls: [...]} for transparency.
-
-    session (from serve.py's auth.py) scopes every tool call to the asking
-    user's own data when they're not an admin - enforced below, not left to
-    the model to respect on its own. The system prompt note is purely for
-    the model's own wording (so it doesn't offer to look up someone else),
-    it is not what's actually keeping their data separated.
-
-    upload (from serve.py/documents.py), if given, is {"filename", "text",
-    "truncated"} for a document the user attached. Explicitly a different,
-    weaker guarantee than every CRM tool here: the text is arbitrary and
-    unverified, the model reads it directly rather than calling a tested
-    function, so there is no headline/guaranteed-correct figure for
-    anything it says from it - the prompt below says this to the model,
-    and the chat UI should say it to the user too.
-    """
+def build_system_prompt(session=None, upload=None):
+    """The system prompt for one turn: the base rules, plus a "you're
+    answering for <rep> only" note for a non-admin, plus an attached
+    document's text if there is one."""
     system_prompt = SYSTEM_PROMPT
     if session and not session.get("is_admin"):
         system_prompt += (
@@ -753,136 +740,54 @@ def ask(user_message, history=None, max_tool_rounds=4, session=None, upload=None
             f"anything that's clearly about its contents, not CRM data), call NO TOOL AT ALL - just read "
             f"the text below and answer directly in your own reply. This includes company names that "
             f"appear IN the document: if the document itself already says what you need, do not call "
-            f"search_company_background or any other tool just because a company name is present - you "
-            f"have done this before, called a web-search tool for a fact the attached document already "
-            f"stated, and then contradicted yourself by saying the document 'didn't mention' something it "
-            f"literally said two sentences earlier. Read the attached text first, fully, before deciding "
-            f"you need a tool at all. Separately: this document is NOT verified the way a CRM tool result "
-            f"is - if you state a number or fact from it, that is your own reading of unverified text, not "
-            f"a computed figure, so never present it with the same confidence as a tool-backed answer. If "
-            f"the document genuinely doesn't contain what was asked, say so rather than guessing.\n\n"
+            f"search_company_background or any other tool just because a company name is present. "
+            f"Read the attached text first, fully, before deciding you need a tool at all. Separately: "
+            f"this document is NOT verified the way a CRM tool result is - if you state a number or fact "
+            f"from it, that is your own reading of unverified text, not a computed figure, so never "
+            f"present it with the same confidence as a tool-backed answer. If the document genuinely "
+            f"doesn't contain what was asked, say so rather than guessing.\n\n"
             f"--- Attached document: {upload['filename']} ---\n{upload['text']}\n--- end of document ---"
         )
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history or [])
-    messages.append({"role": "user", "content": user_message})
-
-    # ALL tools are withheld whenever a document is attached - confirmed by
-    # direct, repeated testing that this isn't a one-tool problem. First
-    # tried an explicit "call no tool" instruction alone - didn't stop it
-    # (4/4 tries still called search_company_background the instant a
-    # company name appeared, including one inside the attached text
-    # itself). Then tried removing just that one tool - the model simply
-    # substituted a different one instead (get_segment_diagnostic, the
-    # instant "BFSI" appeared). The model has a general reflex to call
-    # SOME tool on a recognized keyword, regardless of instructions, so
-    # the only reliable fix is removing every tool for that turn. Trade-
-    # off: a message can be answered from the attachment OR from CRM
-    # tools, never genuinely both in one turn - acceptable for a clear,
-    # predictable rule ("while a file's attached, I only read the file")
-    # over a flexible rule that silently hallucinates.
-    tool_schema = [] if upload else TOOL_SCHEMA
-
-    tool_log = []
-    for round_num in range(max_tool_rounds):
-        try:
-            request_payload = {
-                "model": MODEL, "messages": messages, "stream": False,
-                # Low temperature on purpose: this restates business figures,
-                # it doesn't write creatively. Same question has produced two
-                # different (one fabricated) answers run to run at defaults -
-                # more determinism won't fix transcription errors, but it
-                # stops adding random variance on top of them.
-                "options": {"temperature": 0.1},
-            }
-            if tool_schema:  # omit the key entirely rather than send "tools": [] - untested otherwise
-                request_payload["tools"] = tool_schema
-            data = _post(request_payload)
-        except urllib.error.URLError as error:
-            return {"reply": f"Can't reach the local model (Ollama) - is it running? ({error})", "tool_calls": tool_log}
-
-        msg = data.get("message", {})
-        calls = msg.get("tool_calls") or []
-        if not calls:
-            content = (msg.get("content") or "").strip()
-            # Occasionally the model emits a botched tool-call attempt as
-            # plain text instead of a real tool_calls entry - e.g.
-            # '{"name": "get_data_quality_progress", "parameters": {"}'
-            # (truncated, unparseable JSON), most often for a tool that
-            # takes no arguments. Confirmed this is a real, reproducible
-            # failure mode (not a one-off) by re-running the same question
-            # several times. Retrying once gets a clean tool call or a
-            # real answer instead of relaying the raw JSON fragment to
-            # the user as if it were prose.
-            looks_like_botched_tool_call = content.startswith("{") and '"name"' in content
-            if looks_like_botched_tool_call and round_num < max_tool_rounds - 1:
-                # Resending the identical prompt reliably reproduces the
-                # identical broken output at this temperature - confirmed
-                # empirically, not a guess. The retry has to actually
-                # change the input to have a chance of a different result.
-                messages.append({
-                    "role": "user",
-                    "content": ("That wasn't a valid tool call - it looked like raw JSON text instead "
-                                 "of actually using the tool-calling mechanism. Please call the tool "
-                                 "directly this time."),
-                })
-                continue
-            return {"reply": content, "tool_calls": tool_log,
-                    "headline": build_headline(tool_log)}
-
-        messages.append(msg)
-        for call_req in calls:
-            name = call_req["function"]["name"]
-            args = call_req["function"].get("arguments") or {}
-            if isinstance(args, str):
-                args = json.loads(args or "{}")
-            args = clean_args(args)
-
-            is_non_admin = session and not session.get("is_admin")
-            if is_non_admin and name in ADMIN_ONLY_TOOLS:
-                result = {"error": "That ranks/lists every rep by name - only an admin can see "
-                                    "that. Ask about your own numbers instead, or ask your admin."}
-            else:
-                if is_non_admin and name in OWNER_SCOPED_TOOLS:
-                    args["owner"] = session.get("owner_name")
-                fn = TOOLS.get(name)
-                if not fn:
-                    result = {"error": f"unknown tool '{name}'"}
-                else:
-                    try:
-                        result = fn(args)
-                    except Exception as error:  # noqa: BLE001 - a malformed argument from the
-                        # model (confirmed: it has echoed a parameter's own description text
-                        # back as the value, e.g. "any date (" for a date field) must not crash
-                        # the whole response - surface it as a tool error instead.
-                        result = {"error": f"That didn't work ({error}) - try rephrasing, "
-                                            "or ask without specifying a date/filter."}
-            clean_result = strip_raw_money(result)
-            # Full verified data goes back with the response too, not just to
-            # the model - the model's prose can mis-transcribe a number even
-            # when the underlying figure is correct, so the UI can show the
-            # real thing alongside whatever the model says.
-            tool_log.append({"tool": name, "args": args, "data": clean_result})
-            messages.append({"role": "tool", "content": json.dumps(clean_result, default=str)})
-
-    return {"reply": "That took more tool calls than expected - try asking a more specific question.",
-            "tool_calls": tool_log}
+    return system_prompt
 
 
-if __name__ == "__main__":
-    import readline  # noqa: F401  (nicer input() editing, if available)
-    print(f"Chatting with {MODEL} via Ollama. Ctrl+C to quit.\n")
-    history = []
-    while True:
-        try:
-            q = input("you> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if not q:
-            continue
-        result = ask(q, history)
-        print(f"\nbot> {result['reply']}\n")
-        if result["tool_calls"]:
-            print(f"  (used: {', '.join(t['tool'] for t in result['tool_calls'])})\n")
-        history.append({"role": "user", "content": q})
-        history.append({"role": "assistant", "content": result["reply"]})
+def run_tool(name, args, session=None):
+    """Runs one tool call the model asked for and returns the result the
+    model (and the UI's Verified Data panel) gets back.
+
+    This is where per-user scoping is actually enforced - not left to the
+    model: a non-admin can't call ADMIN_ONLY_TOOLS, and OWNER_SCOPED_TOOLS
+    always get their own owner_name whatever the model passed."""
+    args = clean_args(args or {})
+    is_non_admin = session and not session.get("is_admin")
+    if is_non_admin and name in ADMIN_ONLY_TOOLS:
+        return args, {"error": "That ranks/lists every rep by name - only an admin can see "
+                               "that. Ask about your own numbers instead, or ask your admin."}
+    if is_non_admin and name in OWNER_SCOPED_TOOLS:
+        args["owner"] = session.get("owner_name")
+    fn = TOOLS.get(name)
+    if not fn:
+        return args, {"error": f"unknown tool '{name}'"}
+    try:
+        result = fn(args)
+    except Exception as error:  # noqa: BLE001 - a malformed argument from the model
+        # (it has echoed a parameter's own description text back as the
+        # value) must not crash the whole response - surface it as a tool error.
+        result = {"error": f"That didn't work ({error}) - try rephrasing, "
+                            "or ask without specifying a date/filter."}
+    return args, strip_raw_money(result)
+
+
+def ask(user_message, history=None, session=None, upload=None):
+    """Answers one chat turn. Returns {reply, tool_calls, headline?}.
+
+    No model is connected (Ollama removed, Gemini pending - see the module
+    docstring), so this always returns ASSISTANT_UNAVAILABLE. The Gemini
+    version slots in here: send build_system_prompt(session, upload) +
+    history + user_message with TOOL_SCHEMA (withheld entirely when a
+    document is attached - the local model called tools on any company
+    name it saw, even with instructions not to), execute each requested
+    call through run_tool(), log {"tool", "args", "data"} per call, and
+    return build_headline(tool_log) alongside the model's reply.
+    """
+    return {"reply": ASSISTANT_UNAVAILABLE, "tool_calls": [], "unavailable": True}

@@ -405,6 +405,12 @@ def ep_data_quality(_query):
     return data_quality.current()
 
 
+def ep_chat_status(_query):
+    """Whether the Assistant has a model behind it (none until Gemini)."""
+    return {"available": chatbot.MODEL_CONNECTED,
+            "message": None if chatbot.MODEL_CONNECTED else chatbot.ASSISTANT_UNAVAILABLE}
+
+
 def ep_auth_me(_query):
     session = current_session()
     if not session:
@@ -418,6 +424,7 @@ def ep_user_activity(_query):
 
 ROUTES = {
     "/api/auth/me": ep_auth_me,
+    "/api/chat/status": ep_chat_status,
     "/api/users/activity": ep_user_activity,
     "/api/leads/hot": ep_leads_hot,
     "/api/segments/diagnostic": ep_segment_diagnostic,

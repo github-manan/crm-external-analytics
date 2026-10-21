@@ -241,3 +241,6 @@
 
 /* Line the page title up with the 780px chat column */
 .page-head.narrow { max-width: calc(780px + 2.5rem); }
+
+.suggestions button:disabled, .chat-input textarea:disabled, .attachment-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.suggestions button:disabled:hover { color: var(--text-2); border-color: var(--border-strong); }

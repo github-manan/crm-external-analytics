@@ -1,6 +1,8 @@
-// CRM Assistant - talks only to our own localhost:8420 /api/chat, which in
-// turn talks only to a local Ollama model. No CRM data ever leaves this
-// machine. Read-only: this page cannot write anything to Zoho.
+// CRM Assistant - talks only to our own /api/chat. No AI model is
+// connected right now (Ollama removed, Gemini pending - see chatbot.py),
+// so on load the page checks /api/chat/status and shows itself as offline
+// instead of letting someone type a question into nothing.
+// Read-only: this page cannot write anything to Zoho.
 
 // Redirects to login.html if not logged in; otherwise renders the
 // "logged in as / Logout" pill. Scoping itself happens server-side in
@@ -250,13 +252,28 @@ document.querySelectorAll('.suggestions button').forEach(btn => {
 async function checkStatus() {
   const el = document.getElementById('sync-status');
   try {
-    const res = await fetch('/api/meta');
+    const res = await fetch('/api/chat/status');
     if (!res.ok) throw new Error();
-    el.textContent = 'API connected';
+    const status = await res.json();
+    if (!status.available) {
+      el.textContent = 'Assistant offline';
+      setOffline(status.message);
+      return;
+    }
+    el.textContent = 'Assistant ready';
     el.classList.replace('pill-muted', 'pill-good');
   } catch {
     el.textContent = 'API unreachable — run: python scripts/serve.py';
   }
+}
+
+// No model behind the API: say so in the chat and switch off every input.
+function setOffline(message) {
+  const welcome = document.querySelector('#chat-log .msg.bot .bubble');
+  if (welcome) welcome.textContent = message;
+  ['chat-text', 'chat-send', 'attachment-button'].forEach((id) => { document.getElementById(id).disabled = true; });
+  document.getElementById('chat-text').placeholder = 'The Assistant is offline for now';
+  document.querySelectorAll('.suggestions button').forEach((b) => { b.disabled = true; });
 }
 
 // ---------- document upload ----------

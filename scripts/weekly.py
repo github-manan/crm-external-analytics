@@ -24,6 +24,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
 TARGETS_PATH = os.path.join(ROOT, "config", "targets.json")
 
+# "Admin MitKat" owns 3,341 of 10,547 leads at a 38% conversion rate vs.
+# 1-9% for every named rep with real volume (found during the ML baseline
+# experiment) - almost certainly a bulk-import/default queue, not a person.
+# Same list ist.js labels client-side; kept here too since target() applies
+# a real rep's quota to whatever owner string it's given with no check -
+# this placeholder isn't a salesperson and shouldn't be scored against one.
+NON_INDIVIDUAL_OWNERS = {"Admin MitKat"}
+
 CONTACTED_STATUSES = ("Contacted", "Attempted to Contact")
 STUCK_AFTER_DAYS = 21
 CLOSING_SOON_DAYS = 30
@@ -248,7 +256,10 @@ def target(month=None, owner=None):
     """Revenue target vs actual for the month containing `month`."""
     month = (month or date.today().isoformat())[:7]
     cfg = load_targets()
-    if owner and owner != "All":
+    if owner in NON_INDIVIDUAL_OWNERS:
+        # Not a salesperson - a real rep's default quota doesn't apply.
+        value = None
+    elif owner and owner != "All":
         table = cfg.get("owner_monthly_inr", {})
         value = table.get(owner, table.get("_default", 0))
     else:
@@ -257,7 +268,7 @@ def target(month=None, owner=None):
 
     w, p = owner_clause(owner)
     actual = one(f"""SELECT COALESCE(SUM(amount_inr),0) v, COUNT(*) n FROM v_deals
-                     WHERE is_won = 1 AND strftime('%Y-%m', closing_date) = ?{w}""",
+                     WHERE is_won = 1 AND closing_month_effective = ?{w}""",
                  [month] + p)
     achieved = actual.get("v", 0.0)
     days_total = 30
@@ -265,7 +276,8 @@ def target(month=None, owner=None):
         "month": month, "owner": owner or "All",
         "target_inr": value, "actual_inr": achieved, "deals": actual.get("n", 0),
         "achieved_pct": round(achieved / value * 100, 1) if value else None,
-        "gap_inr": value - achieved,
+        "gap_inr": (value - achieved) if value is not None else None,
+        "not_applicable": (owner in NON_INDIVIDUAL_OWNERS) or None,
         "configured": bool(cfg),
     }
 
@@ -340,42 +352,44 @@ def weeks_available(limit=26):
     return [(monday - timedelta(weeks=i)).isoformat() for i in range(limit)]
 
 
-# Bucket expressions all key off closing_date - the one trustworthy date
-# field on Deals (see transform.py trap 2). "yearly" uses fiscal_year
-# (Apr-Mar), not calendar year, to match "Bookings by fiscal year" already
-# shown elsewhere on the same dashboard - two different "yearly" cuts on
-# one page would be confusing.
+# Bucket expressions key off closing_date_effective (falls back to the
+# record's own last-modified date when Closing_Date is missing - see
+# transform.py trap 2 and the closing_date_is_estimated flag it adds).
+# "yearly" uses fiscal_year_effective (Apr-Mar), not calendar year, to
+# match "Bookings by fiscal year" already shown elsewhere on the same
+# dashboard - two different "yearly" cuts on one page would be confusing.
 REP_TIMESERIES_BUCKETS = {
-    "daily": "closing_date",
-    "weekly": "date(closing_date, '-' || ((CAST(strftime('%w', closing_date) AS INTEGER) + 6) % 7) || ' days')",
-    "monthly": "strftime('%Y-%m', closing_date)",
-    "quarterly": "strftime('%Y', closing_date) || '-Q' || ((CAST(strftime('%m', closing_date) AS INTEGER) - 1) / 3 + 1)",
-    "yearly": "fiscal_year",
+    "daily": "closing_date_effective",
+    "weekly": "date(closing_date_effective, '-' || ((CAST(strftime('%w', closing_date_effective) AS INTEGER) + 6) % 7) || ' days')",
+    "monthly": "closing_month_effective",
+    "quarterly": "strftime('%Y', closing_date_effective) || '-Q' || ((CAST(strftime('%m', closing_date_effective) AS INTEGER) - 1) / 3 + 1)",
+    "yearly": "fiscal_year_effective",
 }
 
 
 def rep_timeseries(owner=None, granularity="monthly", start=None, end=None):
     """One rep's (or everyone's) won deals/revenue over time, bucketed at
-    the given granularity, optionally restricted to a closing_date range.
-    Won deals only, closing_date IS NOT NULL - same 338 deals missing it
-    are excluded here as everywhere else revenue is reported (see
-    /api/meta caveats)."""
+    the given granularity, optionally restricted to a closing_date_effective
+    range. Won deals only - 93 of them have no real Closing_Date and are
+    bucketed by their last-modified date instead of being dropped (see
+    transform.py trap 2 / closing_date_is_estimated)."""
     bucket = REP_TIMESERIES_BUCKETS.get(granularity)
     if bucket is None:
         raise ValueError(f"granularity must be one of {sorted(REP_TIMESERIES_BUCKETS)}")
     w, p = owner_clause(owner)
     if start:
-        w += " AND closing_date >= ?"
+        w += " AND closing_date_effective >= ?"
         p.append(start)
     if end:
-        w += " AND closing_date <= ?"
+        w += " AND closing_date_effective <= ?"
         p.append(end)
     return rows(f"""
         SELECT {bucket} AS period,
                COUNT(*) AS deals_won,
-               ROUND(SUM(amount_inr), 2) AS revenue_inr
+               ROUND(SUM(amount_inr), 2) AS revenue_inr,
+               SUM(closing_date_is_estimated) AS deals_with_estimated_date
         FROM v_deals
-        WHERE is_won = 1 AND closing_date IS NOT NULL {w}
+        WHERE is_won = 1 {w}
         GROUP BY period
         ORDER BY period
     """, p)

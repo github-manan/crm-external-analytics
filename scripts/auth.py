@@ -75,14 +75,33 @@ def save_users(users):
         f.write("\n")
 
 
+# --- login rate limiting ----------------------------------------------------
+# Previously unlimited: any number of attempts, as fast as the client could
+# send them, with nothing to stop it. A per-username lockout also bounds
+# the real resource cost here - PBKDF2 at 200,000 iterations is deliberately
+# slow, so unlimited parallel attempts can genuinely peg the CPU, not just
+# guess passwords.
+LOGIN_MAX_ATTEMPTS = 8
+LOGIN_LOCKOUT_SECONDS = 5 * 60
+_FAILED_LOGINS = {}  # username -> [timestamps of recent failures]
+
+
+def _login_locked_out(username):
+    attempts = [t for t in _FAILED_LOGINS.get(username, []) if time.time() - t < LOGIN_LOCKOUT_SECONDS]
+    _FAILED_LOGINS[username] = attempts
+    return len(attempts) >= LOGIN_MAX_ATTEMPTS
+
+
 def authenticate(username, password):
     """Returns the user record (without salt/hash) on success, else None."""
+    if _login_locked_out(username):
+        return None
     users = load_users()
     record = users.get(username)
-    if not record:
+    if not record or not verify_password(password, record["salt"], record["hash"]):
+        _FAILED_LOGINS.setdefault(username, []).append(time.time())
         return None
-    if not verify_password(password, record["salt"], record["hash"]):
-        return None
+    _FAILED_LOGINS.pop(username, None)
     return {
         "username": username,
         "display_name": record.get("display_name", username),
@@ -106,6 +125,19 @@ def get_session(token):
     if not session:
         return None
     if session["expires_at"] < time.time():
+        del SESSIONS[token]
+        return None
+    # Re-checked against the live user store on every request, not just
+    # trusted from login time - a session used to carry is_admin/owner_name
+    # as a frozen snapshot, so removing or demoting a user had no effect on
+    # whatever session they already held until it naturally expired (up to
+    # SESSION_TTL_SECONDS later). Removed entirely or role/owner changed ->
+    # the old session dies now rather than honoring stale permissions.
+    current = load_users().get(session["username"])
+    if not current:
+        del SESSIONS[token]
+        return None
+    if bool(current.get("is_admin")) != session["is_admin"] or current.get("owner_name") != session["owner_name"]:
         del SESSIONS[token]
         return None
     return session

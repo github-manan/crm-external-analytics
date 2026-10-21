@@ -35,15 +35,15 @@ AGGREGATES = {
         FROM v_deals WHERE pipeline IS NOT NULL
         GROUP BY pipeline ORDER BY won_inr DESC""",
     "seasonality": """
-        SELECT CAST(strftime('%m', closing_date) AS INTEGER) AS month,
+        SELECT CAST(strftime('%m', closing_date_effective) AS INTEGER) AS month,
                COUNT(*) AS deals_won, ROUND(SUM(amount_inr), 2) AS revenue_inr
-        FROM v_deals WHERE is_won = 1 AND closing_date IS NOT NULL
+        FROM v_deals WHERE is_won = 1
         GROUP BY month ORDER BY month""",
     "reps": """
-        SELECT owner_name, fiscal_year, SUM(is_won) AS deals_won,
+        SELECT owner_name, fiscal_year_effective AS fiscal_year, SUM(is_won) AS deals_won,
                ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) AS revenue_inr
-        FROM v_deals WHERE owner_name IS NOT NULL AND fiscal_year IS NOT NULL
-        GROUP BY owner_name, fiscal_year ORDER BY fiscal_year, revenue_inr DESC""",
+        FROM v_deals WHERE owner_name IS NOT NULL AND fiscal_year_effective IS NOT NULL
+        GROUP BY owner_name, fiscal_year_effective ORDER BY fiscal_year_effective, revenue_inr DESC""",
     "pipeline_history": """
         SELECT snapshot_date, COUNT(*) AS open_deals,
                ROUND(SUM(amount_inr), 2) AS value_inr

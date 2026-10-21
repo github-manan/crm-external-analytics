@@ -192,14 +192,19 @@ function renderStages(rows, pipeline) {
   });
 }
 
+let stageRows = [];
 async function loadStages() {
   const { rows } = await getJSON('/api/ist/deals_by_stage');
+  stageRows = rows; // the 'change' listener below reads this, not its own closure -
+                     // it used to capture `rows` from the first call only, so
+                     // switching owner then touching this dropdown re-rendered
+                     // whichever owner was selected when the page first loaded.
   const pipelines = [...new Set(rows.map(r => r.pipeline))].sort();
   const sel = document.getElementById('stage-pipeline');
   if (!sel.dataset.filled) {
-    sel.innerHTML = pipelines.map(p => `<option value="${p}">${p}</option>`).join('');
+    sel.innerHTML = pipelines.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
     sel.dataset.filled = '1';
-    sel.addEventListener('change', () => renderStages(rows, sel.value));
+    sel.addEventListener('change', () => renderStages(stageRows, sel.value));
   }
   renderStages(rows, sel.value || pipelines[0]);
 }
@@ -265,7 +270,7 @@ function ownerLabel(name) {
 async function initOwnerFilter() {
   const { owners } = await getJSON('/api/weekly/options');
   const sel = document.getElementById('owner');
-  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${o}">${ownerLabel(o)}</option>`).join('');
+  sel.innerHTML = '<option value="">All Users</option>' + owners.map(o => `<option value="${esc(o)}">${esc(ownerLabel(o))}</option>`).join('');
   sel.addEventListener('change', async () => {
     state.owner = sel.value;
     await loadAll();

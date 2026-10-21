@@ -12,6 +12,15 @@ They handle the four traps this CRM contains:
   3. Fiscal years run April-March.
   4. Two stage names carry typos in the CRM config ("Pipleline",
      "Negotation"); `stage` is cleaned, `stage_raw` preserves the original.
+  5. Zoho's datetime fields (Created_Time, Modified_Time, Last_Activity_Time,
+     Converted_Date_Time, Call_Start_Time, Start_DateTime - anything that
+     isn't a plain date like Closing_Date/Due_Date) come back as ISO-8601
+     with a +05:30 offset, e.g. "2026-10-19T02:00:00+05:30". SQLite's own
+     date()/datetime()/strftime() silently convert an offset-bearing string
+     to UTC, which shifts anything from 00:00-05:30 IST onto the previous
+     day (or week). The offset here is always +05:30, so IST_DATE/
+     IST_DATETIME/IST_MONTH below read the wall-clock digits directly
+     instead of letting SQLite "helpfully" convert them.
 
 Views are recreated on every run, so this is safe to re-run any time.
 Usage: python3 scripts/transform.py
@@ -23,6 +32,12 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
+
+# See trap 5 above - use these on any Zoho *datetime* field (not a plain
+# date like Closing_Date/Due_Date, which carry no offset and are fine as-is).
+IST_DATE = "substr({d}, 1, 10)"
+IST_DATETIME = "substr({d}, 1, 16)"
+IST_MONTH = "substr({d}, 1, 7)"
 
 # Apr-Mar fiscal year label, e.g. 2026-04-15 -> FY2026-27
 FISCAL_YEAR = """
@@ -73,7 +88,13 @@ SELECT
     {STAGE_ORDER}                                               AS stage_order,
     json_extract(payload, '$.Stage') = 'Closed Won'             AS is_won,
     json_extract(payload, '$.Stage') = 'Closed Lost'            AS is_lost,
-    json_extract(payload, '$.Stage') NOT IN ('Closed Won', 'Closed Lost') AS is_open,
+    -- Was "Stage NOT IN ('Closed Won', 'Closed Lost')" - matched only those
+    -- two exact strings, so any future closed stage with a different exact
+    -- name (e.g. "Closed Lost to Competition") would silently count as open.
+    -- LIKE 'Closed%' catches any closed-sounding stage, known or not; the
+    -- business question of whether OnHold should count as open is separate
+    -- and deliberately untouched here - see README/project notes.
+    json_extract(payload, '$.Stage') NOT LIKE 'Closed%'         AS is_open,
     json_extract(payload, '$.Pipeline')                         AS pipeline,
     json_extract(payload, '$.Owner.name')                       AS owner_name,
     json_extract(payload, '$.Owner.id')                         AS owner_id,
@@ -93,6 +114,16 @@ SELECT
     date(json_extract(payload, '$.Closing_Date'))               AS closing_date,
     strftime('%Y-%m', json_extract(payload, '$.Closing_Date'))  AS closing_month,
     {FISCAL_YEAR.format(d="json_extract(payload, '$.Closing_Date')")} AS fiscal_year,
+    -- 93 of 1,679 won deals have no Closing_Date, which silently dropped
+    -- them from every bookings figure (v_bookings_monthly/_fiscal filtered
+    -- on "closing_date IS NOT NULL"). These _effective columns fall back to
+    -- the record's own last-modified date - the best available proxy for
+    -- "when this was actually won" - and flag which rows are estimated so
+    -- a consumer can tell real from inferred.
+    COALESCE(date(json_extract(payload, '$.Closing_Date')), {IST_DATE.format(d="modified_time")}) AS closing_date_effective,
+    COALESCE(strftime('%Y-%m', json_extract(payload, '$.Closing_Date')), {IST_MONTH.format(d="modified_time")}) AS closing_month_effective,
+    {FISCAL_YEAR.format(d='COALESCE(json_extract(payload, \'$.Closing_Date\'), ' + IST_DATE.format(d="modified_time") + ')')} AS fiscal_year_effective,
+    CASE WHEN json_extract(payload, '$.Closing_Date') IS NULL THEN 1 ELSE 0 END AS closing_date_is_estimated,
     json_extract(payload, '$.Financial_Year')                   AS fiscal_year_field,
     json_extract(payload, '$.Lead_Source')                      AS lead_source,
     json_extract(payload, '$.Opportunity_Type')                 AS opportunity_type,
@@ -108,7 +139,7 @@ SELECT
     -- Lost_Reason holds billing frequency in this CRM, not loss causes.
     json_extract(payload, '$.Lost_Reason')                      AS lost_reason_misused,
     json_extract(payload, '$.Next_Step')                        AS next_step,
-    datetime(json_extract(payload, '$.Last_Activity_Time'))     AS last_activity_time,
+    {IST_DATETIME.format(d="json_extract(payload, '$.Last_Activity_Time')")} AS last_activity_time,
     modified_time,
     extracted_at
 FROM records
@@ -132,13 +163,13 @@ SELECT
     date(json_extract(payload, '$.Closing_Date'))               AS closing_date,
     json_extract(payload, '$.Moved_To__s')                      AS moved_to,
     json_extract(payload, '$.Modified_By.name')                 AS changed_by,
-    datetime(json_extract(payload, '$.Modified_Time'))          AS changed_at,
-    {FISCAL_YEAR.format(d="json_extract(payload, '$.Modified_Time')")} AS fiscal_year
+    {IST_DATETIME.format(d="json_extract(payload, '$.Modified_Time')")} AS changed_at,
+    {FISCAL_YEAR.format(d=IST_DATE.format(d="json_extract(payload, '$.Modified_Time')"))} AS fiscal_year
 FROM records
 WHERE module = 'DealHistory' AND is_deleted = 0
 """
 
-VIEWS["v_leads"] = """
+VIEWS["v_leads"] = f"""
 SELECT
     id,
     json_extract(payload, '$.Full_Name')                        AS full_name,
@@ -152,20 +183,20 @@ SELECT
     json_extract(payload, '$.Owner.name')                       AS owner_name,
     json_extract(payload, '$.Owner.id')                         AS owner_id,
     COALESCE(json_extract(payload, '$.Converted__s'), 0)        AS is_converted,
-    date(json_extract(payload, '$.Converted_Date_Time'))        AS converted_date,
+    {IST_DATE.format(d="json_extract(payload, '$.Converted_Date_Time')")} AS converted_date,
     json_extract(payload, '$.Converted_Deal.id')                AS converted_deal_id,
     json_extract(payload, '$.Converted_Account.id')             AS converted_account_id,
     json_extract(payload, '$.Converted_Contact.id')             AS converted_contact_id,
     -- Unlike Deals, Leads do carry a real Created_Time.
-    datetime(json_extract(payload, '$.Created_Time'))           AS created_time,
-    strftime('%Y-%m', json_extract(payload, '$.Created_Time'))  AS created_month,
+    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
+    {IST_MONTH.format(d="json_extract(payload, '$.Created_Time')")} AS created_month,
     modified_time,
     extracted_at
 FROM records
 WHERE module = 'Leads' AND is_deleted = 0
 """
 
-VIEWS["v_accounts"] = """
+VIEWS["v_accounts"] = f"""
 SELECT
     id,
     json_extract(payload, '$.Account_Name')                     AS account_name,
@@ -176,14 +207,14 @@ SELECT
     json_extract(payload, '$.Website')                          AS website,
     json_extract(payload, '$.Owner.name')                       AS owner_name,
     json_extract(payload, '$.Owner.id')                         AS owner_id,
-    datetime(json_extract(payload, '$.Created_Time'))           AS created_time,
+    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
     modified_time,
     extracted_at
 FROM records
 WHERE module = 'Accounts' AND is_deleted = 0
 """
 
-VIEWS["v_contacts"] = """
+VIEWS["v_contacts"] = f"""
 SELECT
     id,
     json_extract(payload, '$.Full_Name')                        AS full_name,
@@ -194,14 +225,14 @@ SELECT
     json_extract(payload, '$.Account_Name.id')                  AS account_id,
     json_extract(payload, '$.Lead_Source')                      AS lead_source,
     json_extract(payload, '$.Owner.name')                       AS owner_name,
-    datetime(json_extract(payload, '$.Created_Time'))           AS created_time,
+    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
     modified_time,
     extracted_at
 FROM records
 WHERE module = 'Contacts' AND is_deleted = 0
 """
 
-VIEWS["v_activities"] = """
+VIEWS["v_activities"] = f"""
 SELECT
     module                                                      AS activity_type,
     id,
@@ -215,11 +246,11 @@ SELECT
     json_extract(payload, '$.What_Id.name')                      AS related_record,
     COALESCE(
         date(json_extract(payload, '$.Due_Date')),
-        date(json_extract(payload, '$.Call_Start_Time')),
-        date(json_extract(payload, '$.Start_DateTime'))
+        {IST_DATE.format(d="json_extract(payload, '$.Call_Start_Time')")},
+        {IST_DATE.format(d="json_extract(payload, '$.Start_DateTime')")}
     )                                                           AS activity_date,
     json_extract(payload, '$.Call_Duration')                    AS call_duration,
-    datetime(json_extract(payload, '$.Created_Time'))           AS created_time,
+    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
     modified_time
 FROM records
 WHERE module IN ('Tasks', 'Calls', 'Events') AND is_deleted = 0
@@ -268,25 +299,27 @@ FROM users
 
 VIEWS["v_bookings_monthly"] = """
 SELECT
-    closing_month,
-    fiscal_year,
+    closing_month_effective                                     AS closing_month,
+    fiscal_year_effective                                        AS fiscal_year,
     pipeline,
     COUNT(*)                                                    AS deals_won,
-    ROUND(SUM(amount_inr), 2)                                   AS revenue_inr
+    ROUND(SUM(amount_inr), 2)                                   AS revenue_inr,
+    SUM(closing_date_is_estimated)                              AS deals_with_estimated_date
 FROM v_deals
-WHERE is_won = 1 AND closing_date IS NOT NULL
-GROUP BY closing_month, fiscal_year, pipeline
+WHERE is_won = 1
+GROUP BY closing_month_effective, fiscal_year_effective, pipeline
 """
 
 VIEWS["v_bookings_fiscal"] = """
 SELECT
-    fiscal_year,
+    fiscal_year_effective                                       AS fiscal_year,
     COUNT(*)                                                    AS deals_won,
     ROUND(SUM(amount_inr), 2)                                   AS revenue_inr,
-    ROUND(AVG(amount_inr), 2)                                   AS avg_deal_inr
+    ROUND(AVG(amount_inr), 2)                                   AS avg_deal_inr,
+    SUM(closing_date_is_estimated)                              AS deals_with_estimated_date
 FROM v_deals
-WHERE is_won = 1 AND closing_date IS NOT NULL
-GROUP BY fiscal_year
+WHERE is_won = 1
+GROUP BY fiscal_year_effective
 """
 
 VIEWS["v_open_pipeline"] = """

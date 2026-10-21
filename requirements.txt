@@ -1,0 +1,7 @@
+# Only needed for the AI assistant's optional features - the Zoho sync,
+# transform, and dashboards themselves are stdlib Python 3 only (see README).
+# search_company_background:
+ddgs>=9.0
+# Document upload (.pdf/.xlsx attachments):
+pypdf>=6.0
+openpyxl>=3.1

@@ -122,7 +122,7 @@ def _lead_segment(column, value):
 
 def _pipeline_segment(value):
     seg = one("""
-        SELECT COUNT(*) deals, SUM(is_won) won, SUM(is_open) open_deals,
+        SELECT COUNT(*) deals, SUM(is_won) won, SUM(is_lost) lost, SUM(is_open) open_deals,
                ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) won_inr,
                ROUND(SUM(CASE WHEN is_open THEN amount_inr END), 2) open_inr
         FROM v_deals WHERE pipeline = ?
@@ -136,26 +136,38 @@ def _pipeline_segment(value):
         GROUP BY stage, stage_order ORDER BY stage_order
     """, (value,))
 
-    overall = one("SELECT SUM(is_won) won, COUNT(*) deals FROM v_deals")
-    win_rate = seg["won"] / seg["deals"]
-    overall_win_rate = overall["won"] / overall["deals"]
+    overall = one("SELECT SUM(is_won) won, SUM(is_lost) lost FROM v_deals")
+    # Win rate is won / decided (won + lost), not won / all deals - the
+    # latter dilutes it with every still-open, undecided deal (a pipeline
+    # that's 90% open and 10% won-of-the-rest would read as "10% win rate",
+    # which reads as "we lose 90% of the time" when really nothing's been
+    # decided on those yet).
+    decided = seg["won"] + seg["lost"]
+    overall_decided = overall["won"] + overall["lost"]
+    win_rate = seg["won"] / decided if decided else None
+    overall_win_rate = overall["won"] / overall_decided if overall_decided else None
 
     result = {
         "dimension": "pipeline",
         "value": value,
-        "metric": "deal win rate",
+        "metric": "deal win rate (of decided deals - won or lost, excludes still-open)",
         "deals": seg["deals"],
         "won": seg["won"],
+        "lost": seg["lost"],
         "open_deals": seg["open_deals"],
-        "win_rate": round(win_rate, 4),
-        "company_win_rate": round(overall_win_rate, 4),
-        "vs_company": "above average" if win_rate > overall_win_rate else "below average",
+        "win_rate": round(win_rate, 4) if win_rate is not None else None,
+        "company_win_rate": round(overall_win_rate, 4) if overall_win_rate is not None else None,
+        "vs_company": (
+            ("above average" if win_rate > overall_win_rate else "below average")
+            if win_rate is not None and overall_win_rate is not None else None
+        ),
         "won_inr": seg["won_inr"],
         "open_inr": seg["open_inr"],
         "open_deals_by_stage": stages,
     }
-    if seg["deals"] < MIN_SAMPLE:
+    if decided < MIN_SAMPLE:
         result["sample_size_warning"] = (
-            f"Only {seg['deals']} deals for this pipeline - small sample, treat as indicative only."
+            f"Only {decided} decided (won+lost) deals for this pipeline - small sample, "
+            f"treat as indicative only. {seg['open_deals']} more are still open and undecided."
         )
     return result

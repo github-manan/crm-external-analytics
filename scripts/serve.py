@@ -173,10 +173,10 @@ def ep_bookings_fiscal(query):
     if not owner:
         return {"rows": rows("SELECT * FROM v_bookings_fiscal ORDER BY fiscal_year")}
     return {"rows": rows(
-        """SELECT fiscal_year, COUNT(*) AS deals_won, ROUND(SUM(amount_inr), 2) AS revenue_inr,
-                  ROUND(AVG(amount_inr), 2) AS avg_deal_inr
-           FROM v_deals WHERE is_won = 1 AND closing_date IS NOT NULL AND owner_name = ?
-           GROUP BY fiscal_year ORDER BY fiscal_year""", (owner,))}
+        """SELECT fiscal_year_effective AS fiscal_year, COUNT(*) AS deals_won,
+                  ROUND(SUM(amount_inr), 2) AS revenue_inr, ROUND(AVG(amount_inr), 2) AS avg_deal_inr
+           FROM v_deals WHERE is_won = 1 AND owner_name = ?
+           GROUP BY fiscal_year_effective ORDER BY fiscal_year_effective""", (owner,))}
 
 
 def ep_bookings_monthly(query):
@@ -199,10 +199,10 @@ def ep_bookings_monthly(query):
         clause += " AND pipeline = ?"
         params.append(pipeline)
     return {"rows": rows(
-        f"""SELECT closing_month, fiscal_year, COUNT(*) AS deals_won,
-                   ROUND(SUM(amount_inr), 2) AS revenue_inr
-            FROM v_deals WHERE is_won = 1 AND closing_date IS NOT NULL AND {clause}
-            GROUP BY closing_month, fiscal_year ORDER BY closing_month""", params)}
+        f"""SELECT closing_month_effective AS closing_month, fiscal_year_effective AS fiscal_year,
+                   COUNT(*) AS deals_won, ROUND(SUM(amount_inr), 2) AS revenue_inr
+            FROM v_deals WHERE is_won = 1 AND {clause}
+            GROUP BY closing_month_effective, fiscal_year_effective ORDER BY closing_month_effective""", params)}
 
 
 def ep_pipeline_open(query):
@@ -269,11 +269,11 @@ def ep_seasonality(query):
     owner = scoped_owner_optional(query)
     clause, params = ("", ()) if not owner else (" AND owner_name = ?", (owner,))
     return {"note": "Share of all-time won revenue by calendar month.", "rows": rows(
-        f"""SELECT CAST(strftime('%m', closing_date) AS INTEGER) AS month,
+        f"""SELECT CAST(strftime('%m', closing_date_effective) AS INTEGER) AS month,
                    COUNT(*) AS deals_won,
                    ROUND(SUM(amount_inr), 2) AS revenue_inr
             FROM v_deals
-            WHERE is_won = 1 AND closing_date IS NOT NULL{clause}
+            WHERE is_won = 1{clause}
             GROUP BY month ORDER BY month""", params)}
 
 
@@ -387,7 +387,9 @@ def ep_account_contacts(query):
     account_name = query.get("account_name", [None])[0]
     if not account_name:
         return {"error": "pass ?account_name=..."}, 400
-    return contacts.account_contacts(account_name)
+    session = current_session()
+    owner = session["owner_name"] if session and not session.get("is_admin") else None
+    return contacts.account_contacts(account_name, owner=owner)
 
 
 def ep_data_quality(_query):
@@ -541,7 +543,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _handle_logout(self):
+        session = auth.get_session(self._session_token())
         auth.delete_session(self._session_token())
+        if session:
+            documents.clear_uploads(session["username"])
         payload = b'{"ok": true}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -556,6 +561,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         _local.session = session
 
         if not parsed.path.startswith("/api"):
+            # export_json.py writes raw, unfiltered data dumps straight into
+            # dashboard/data/ (its own docstring: "for a dashboard that ships
+            # as plain files, no server running"). That's a separate,
+            # no-login deployment mode - but dashboard/ is also this server's
+            # own static dir, and the check below only ever gated .html
+            # paths, so if that export ever runs while this login-protected
+            # server is the one actually in use, anyone who can reach it
+            # could fetch the full dump with no session at all. Blocked
+            # outright, logged in or not - a real session gets its data
+            # through /api/* like everything else already does.
+            if parsed.path.startswith("/data/") or parsed.path == "/data":
+                return self._write_json({"error": "not served here - use /api/*"}, 403)
             is_html_page = parsed.path in ("", "/") or parsed.path.endswith(".html")
             if is_html_page and parsed.path not in PUBLIC_PAGES and not session:
                 self.send_response(302)
@@ -584,9 +601,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         self._write_json(result)
 
+    # Bigger than any real request needs - the base64-encoded document
+    # upload is the largest legitimate body (5MB raw -> ~6.8MB encoded).
+    # Previously unbounded: a client could claim any Content-Length at all
+    # and this would read that many bytes straight into memory before any
+    # other check ran, so one request with a huge claimed size was enough
+    # to exhaust memory on its own (this machine's RAM is already a known
+    # constraint - see the hardware/Ollama reliability notes).
+    MAX_BODY_BYTES = 10 * 1024 * 1024
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         length = int(self.headers.get("Content-Length", 0))
+        if length > self.MAX_BODY_BYTES:
+            return self._write_json({"error": "request body too large"}, 413)
         raw = self.rfile.read(length) if length else b"{}"
         try:
             body = json.loads(raw or b"{}")

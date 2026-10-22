@@ -27,6 +27,15 @@ Set-Location (Join-Path $PSScriptRoot "..")
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 $log = "logs\daily.log"
 
+# This file only ever got appended to - started at 0 bytes on day one, sat
+# at 836KB by day 40-ish with no cap at all. Simple one-generation rotation:
+# once it passes 5MB, the whole thing moves to daily.log.1 (overwriting
+# whatever was there before) and a fresh log starts - bounded disk use
+# without needing a real log-rotation tool for a once-a-day script.
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 5MB) {
+    Move-Item -Force $log "logs\daily.log.1"
+}
+
 "=== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" | Out-File -Append $log
 
 try {

@@ -4,6 +4,13 @@
 Power BI, Excel and Google Sheets all take CSV; Metabase, Tableau and DuckDB
 can query data/crm.db in place and don't need this.
 
+v_contacts includes real emails, in plain text, in a file this script never
+cleans up - exports/ is gitignored so it won't leak via a commit, but
+nothing deletes an old export either, so CSVs with contact emails can sit
+on disk indefinitely across however many times this has been run. If
+that's a problem for how this machine is handled/backed up, clear out
+exports/ manually after you're done with whatever needed the CSV.
+
 Usage:
     python3 scripts/export.py              # all views -> exports/
     python3 scripts/export.py v_deals      # one view

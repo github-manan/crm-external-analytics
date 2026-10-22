@@ -589,15 +589,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if is_admin_route and not session.get("is_admin"):
             return self._write_json({"error": "admin only"}, 403)
 
-        if parsed.path in ROUTES:
-            result = ROUTES[parsed.path](query)
-        elif parsed.path.startswith("/api/view/"):
-            result = ep_view(query, parsed.path[len("/api/view/"):])
-        elif parsed.path in ("/api", "/api/"):
-            result = {"endpoints": sorted(ROUTES) + sorted(POST_ROUTES) + ["/api/view/<view_name>"]}
-        else:
-            result = ({"error": f"no such endpoint '{parsed.path}'",
-                       "endpoints": sorted(ROUTES)}, 404)
+        try:
+            if parsed.path in ROUTES:
+                result = ROUTES[parsed.path](query)
+            elif parsed.path.startswith("/api/view/"):
+                result = ep_view(query, parsed.path[len("/api/view/"):])
+            elif parsed.path in ("/api", "/api/"):
+                result = {"endpoints": sorted(ROUTES) + sorted(POST_ROUTES) + ["/api/view/<view_name>"]}
+            else:
+                result = ({"error": f"no such endpoint '{parsed.path}'",
+                           "endpoints": sorted(ROUTES)}, 404)
+        except Exception as error:  # noqa: BLE001 - a bad query param (e.g. an unparseable
+            # date) must return a clean 400, not crash the handler thread and drop the
+            # connection with no response at all (confirmed: ?week=not-a-date did exactly that).
+            result = ({"error": f"bad request: {error}"}, 400)
 
         self._write_json(result)
 
@@ -634,7 +639,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path not in POST_ROUTES:
             return self._write_json({"error": f"no such endpoint '{parsed.path}'"}, 404)
 
-        self._write_json(POST_ROUTES[parsed.path](body))
+        try:
+            result = POST_ROUTES[parsed.path](body)
+        except Exception as error:  # noqa: BLE001 - same reasoning as the GET dispatch above -
+            # malformed input must return a clean 400, not drop the connection.
+            return self._write_json({"error": f"bad request: {error}"}, 400)
+        self._write_json(result)
 
     def log_message(self, fmt, *args):
         sys.stderr.write(f"  {fmt % args}\n")

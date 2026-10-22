@@ -6,6 +6,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
 
+# Same one-generation rotation as daily.ps1 - this file only ever grew.
+if [ -f logs/daily.log ] && [ "$(wc -c < logs/daily.log)" -gt 5242880 ]; then
+    mv -f logs/daily.log logs/daily.log.1
+fi
+
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
     python3 scripts/extract.py

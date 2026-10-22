@@ -11,18 +11,35 @@ const dark = resolvedTheme() === 'dark';
 const GRID_COLOR = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
 const TICK_COLOR = dark ? '#94a0b8' : '#64748b';
 
-Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-Chart.defaults.font.size = 12;
-Chart.defaults.color = TICK_COLOR;
-Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
-Chart.defaults.plugins.tooltip.titleColor = '#fff';
-Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
-Chart.defaults.plugins.tooltip.padding = 10;
-Chart.defaults.plugins.tooltip.cornerRadius = 8;
-Chart.defaults.plugins.tooltip.displayColors = false;
-Chart.defaults.elements.line.borderWidth = 2.5;
-Chart.defaults.elements.bar.borderRadius = 6;
-Chart.defaults.elements.bar.borderSkipped = false;
+// See app.js for why this is guarded - Chart.js loads from a CDN and the
+// unguarded version of this block used to kill this entire script (not
+// just charts) the instant that CDN was unreachable.
+const CHARTS_AVAILABLE = typeof Chart !== 'undefined';
+if (!CHARTS_AVAILABLE) {
+  const banner = document.createElement('div');
+  banner.className = 'pill pill-warn';
+  banner.style.cssText = 'display:block;margin:0.75rem 1.4rem;padding:0.6rem 1rem;';
+  banner.textContent = 'Charts failed to load (Chart.js CDN unreachable) - numbers below are still live, just without graphs.';
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+function safeChart(ctx, config) {
+  return CHARTS_AVAILABLE ? new Chart(ctx, config) : null;
+}
+
+if (CHARTS_AVAILABLE) {
+  Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  Chart.defaults.font.size = 12;
+  Chart.defaults.color = TICK_COLOR;
+  Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
+  Chart.defaults.plugins.tooltip.titleColor = '#fff';
+  Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
+  Chart.defaults.plugins.tooltip.padding = 10;
+  Chart.defaults.plugins.tooltip.cornerRadius = 8;
+  Chart.defaults.plugins.tooltip.displayColors = false;
+  Chart.defaults.elements.line.borderWidth = 2.5;
+  Chart.defaults.elements.bar.borderRadius = 6;
+  Chart.defaults.elements.bar.borderSkipped = false;
+}
 
 const state = { owner: '' };
 
@@ -156,7 +173,7 @@ async function loadSources(scope) {
 
   const ctx = document.getElementById('chart-sources');
   sourcesChart?.destroy();
-  sourcesChart = new Chart(ctx, {
+  sourcesChart = safeChart(ctx, {
     type: 'doughnut',
     data: { labels, datasets: [{ data, backgroundColor: labels.map((_, i) => PALETTE[i % PALETTE.length]) }] },
     options: { plugins: { legend: { display: false } }, cutout: '60%' },
@@ -176,7 +193,7 @@ function renderStages(rows, pipeline) {
   const filtered = rows.filter(r => r.pipeline === pipeline).sort((a, b) => a.stage_order - b.stage_order);
   const ctx = document.getElementById('chart-stages');
   stagesChart?.destroy();
-  stagesChart = new Chart(ctx, {
+  stagesChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: filtered.map(r => r.stage),
@@ -241,7 +258,7 @@ async function loadLeadStatus() {
   const { rows } = await getJSON('/api/ist/lead_status');
   const ctx = document.getElementById('chart-status');
   statusChart?.destroy();
-  statusChart = new Chart(ctx, {
+  statusChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => r.status),

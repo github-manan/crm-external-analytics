@@ -1,4 +1,4 @@
-# Zoho CRM → local data layer
+# MitKat GrowthIQ — Zoho CRM → local data layer
 
 Pulls Zoho CRM into a local SQLite database with typed SQL views on top, so
 dashboards and models can be built without touching the Zoho API or its
@@ -54,31 +54,44 @@ python3 scripts/export_json.py  # aggregates -> dashboard/data/*.json - a
 
 The dashboard is hand-built — no BI platform. Two ways to get at the data.
 
-### Two dashboards, deliberately separate
+### The dashboard pages
 
 | Page | Owner | Purpose |
 |---|---|---|
-| `dashboard/index.html` + `app.js` + `style.css` | Ankit | Overall sales dashboard - bookings, funnel, seasonality, reps |
-| `dashboard/weekly.html` + `weekly.js` + `weekly.css` | Manan | Weekly review deck for the sales call with the heads and CEO |
+| `dashboard/index.html` + `app.js` | Ankit | Overall - the CEO view: bookings, pipeline, seasonality, reps |
+| `dashboard/ist.html` + `ist.js` + `ist.css` | Ankit / Manan | IST Dashboard - the IST team's weekly view (absorbed the Weekly Review) |
+| `dashboard/chat.html` + `chat.js` + `chat.css` | Ankit | Assistant (local chatbot over the CRM data) |
 
-They share the API and nothing else - separate files, separate endpoints
-(`/api/weekly/*` vs the rest). Edit one without touching the other.
+The IST Dashboard began as a copy of the native Zoho "IST Dashboard" and
+absorbed the old Weekly Review page (`weekly.html`, removed). Open it at
+`http://localhost:8420/ist.html`.
 
-Open them at `http://localhost:8420/index.html` and
-`http://localhost:8420/weekly.html`.
+Shared styling: `style.css` holds the color tokens (light and dark) and
+`charts.js` the Chart.js theme every page uses - chart colors are validated
+steps, so change them there, not per chart.
 
-**The weekly dashboard adds:**
+**The IST Dashboard uses:**
 
 | Endpoint | Returns |
 |---|---|
 | `/api/weekly/options` | owner list, selectable weeks, current week |
 | `/api/weekly/summary` | KPI tiles, movement summary, target vs actual |
 | `/api/weekly/journey` | Lead -> Contacted -> Converted -> Action -> Won |
-| `/api/weekly/sources` | leads by source for the week |
-| `/api/weekly/movement` | every stage change that week, from -> to |
+| `/api/weekly/sources` | leads by source for the period (`?scope=all` for all-time) |
+| `/api/weekly/movement` | every stage change in the period, from -> to |
 | `/api/weekly/attention` | stuck deals, slipped close dates, closing in 30 days |
+| `/api/ist/deals_by_stage` | deals per stage, per pipeline |
+| `/api/ist/performance` | 3-week table ending with the period's last week |
+| `/api/ist/lead_status` | leads by lead status |
+| `/api/leads/hot` | heuristic hot-lead score |
 
-All take `?week=YYYY-MM-DD` (any date in the week) and `?owner=<name>`.
+All take `?owner=<name>` and a period: either `?start=YYYY-MM-DD&end=YYYY-MM-DD`
+(the page's From/To picker) or `?week=YYYY-MM-DD` (that date's Monday-Sunday week).
+KPI deltas compare against the same-length period just before. For a past period, deal state (pipeline, stages, stuck, closing soon) is
+rebuilt from deal history as of its last day - see `DEALS_AS_OF` in
+`scripts/weekly.py`. Lead status and hot-lead scores have no history in
+Zoho, so for a past period they use today's values for the leads that existed
+then; the page labels this.
 
 **Revenue targets live in `config/targets.json`**, not the CRM - Zoho holds no
 quota data on this plan. Edit that file; it is read live, no restart needed.

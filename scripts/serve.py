@@ -144,8 +144,9 @@ def ep_meta(_):
         "caveats": [
             "Use amount_inr, never amount_original - 64 deals are USD.",
             "Deals have no usable Created_Time; it is the 2025-11-18 migration date.",
-            "336 deals lack closing_date, 93 of them Closed Won (Rs 6.71 cr), and are "
-            "absent from the bookings views.",
+            "93 won deals have no real Closing_Date - bucketed by their last-modified "
+            "date instead (closing_date_effective), flagged via closing_date_is_estimated, "
+            "rather than being silently absent from bookings/target figures.",
             "Group funnels by pipeline - Consulting, Datasurfr, MSS and Renewal have "
             "different stage sets.",
             "Sort stages by stage_order, not alphabetically.",
@@ -307,6 +308,14 @@ def ep_query(query):
 # --- Weekly dashboard -------------------------------------------------------
 
 def _wk(query):
+    """(period, owner). The period is ?start=&end= (From/To picker) when
+    both are given, else ?week= - see weekly.week_bounds for both forms."""
+    start, end = query.get("start", [None])[0], query.get("end", [None])[0]
+    if start and end:
+        try:
+            return weekly.make_period(start, end), scoped_owner(query)
+        except ValueError:
+            pass  # malformed dates: fall back to the week, never a 500
     return query.get("week", [None])[0], scoped_owner(query)
 
 
@@ -324,7 +333,7 @@ def ep_weekly_journey(query):
     # Doesn't name any individual (just funnel counts), so - unlike the
     # other weekly/* endpoints - this one honors the company-wide toggle
     # too (the Overall page's Total Leads / conversion KPI tiles use it).
-    week = query.get("week", [None])[0]
+    week, _ = _wk(query)
     owner = scoped_owner_optional(query)
     return weekly.journey(week, owner, query.get("scope", ["all"])[0])
 
@@ -343,9 +352,9 @@ def ep_weekly_movement(query):
 def ep_weekly_attention(query):
     week, owner = _wk(query)
     return {
-        "stuck": weekly.stuck_deals(owner),
+        "stuck": weekly.stuck_deals(owner, week=week),
         "slipped": weekly.slipped_deals(week, owner),
-        "closing_soon": weekly.closing_soon(owner),
+        "closing_soon": weekly.closing_soon(owner, week=week),
     }
 
 
@@ -357,22 +366,25 @@ def ep_weekly_options(_):
 # --- IST dashboard (replicates a native Zoho CRM Analytics dashboard) -------
 
 def ep_ist_deals_by_stage(query):
-    return {"rows": ist.deals_by_stage(scoped_owner(query))}
+    week, owner = _wk(query)
+    return {"rows": ist.deals_by_stage(owner, week)}
 
 
 def ep_ist_lead_status(query):
-    return {"rows": ist.lead_status(scoped_owner(query))}
+    week, owner = _wk(query)
+    return {"rows": ist.lead_status(owner, week)}
 
 
 def ep_ist_performance(query):
+    week, owner = _wk(query)
     weeks = min(int(query.get("weeks", ["3"])[0]), 26)
-    return {"rows": ist.performance_weeks(weeks, scoped_owner(query))}
+    return {"rows": ist.performance_weeks(weeks, owner, week)}
 
 
 def ep_leads_hot(query):
-    owner = scoped_owner(query)
+    week, owner = _wk(query)
     limit = min(int(query.get("limit", ["20"])[0]), 100)
-    return {"rows": leads.hot_leads(owner, limit)}
+    return {"rows": leads.hot_leads(owner, limit, weekly.as_of_date(week))}
 
 
 def ep_segment_diagnostic(query):
@@ -504,6 +516,14 @@ PUBLIC_PAGES = {"/login.html"}
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
+
+    def end_headers(self):
+        # Without this, browsers cache ist.js/ist.css on their own heuristic
+        # and keep running the old code after a dashboard change. no-cache
+        # still allows caching, it just makes the browser re-check each
+        # load (a cheap 304 when nothing changed).
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
 
     def _session_token(self):
         for part in self.headers.get("Cookie", "").split(";"):

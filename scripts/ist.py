@@ -28,37 +28,48 @@ Zoho's internal logic.
 
 import weekly
 from weekly import db, rows, one, week_bounds, owner_clause, movement, movement_summary  # noqa: F401
+from weekly import as_of_date, DEALS_AS_OF
 
 
-def deals_by_stage(owner=None):
+def deals_by_stage(owner=None, week=None):
+    """For a past week, each deal's stage as of that Sunday (from history)."""
     w, p = owner_clause(owner)
+    as_of = as_of_date(week)
+    cte, src, params = (f"WITH {DEALS_AS_OF}", "asof", [as_of] + p) if as_of else ("", "v_deals", p)
     return rows(f"""
+        {cte}
         SELECT pipeline, stage, stage_order, COUNT(*) deal_count,
                COALESCE(SUM(amount_inr), 0) value_inr
-        FROM v_deals
+        FROM {src}
         WHERE pipeline IS NOT NULL{w}
         GROUP BY pipeline, stage, stage_order
         ORDER BY pipeline, stage_order
-    """, p)
+    """, params)
 
 
-def lead_status(owner=None):
+def lead_status(owner=None, week=None):
+    """For a past week: leads created by that Sunday, but with today's
+    status - Zoho keeps no history of lead status changes."""
     w, p = owner_clause(owner)
+    as_of = as_of_date(week)
+    created = " AND date(created_time) <= ?" if as_of else ""
     return rows(f"""
         SELECT COALESCE(lead_status, 'None') status, COUNT(*) n
         FROM v_leads
-        WHERE 1=1{w}
+        WHERE 1=1{created}{w}
         GROUP BY status
         ORDER BY n DESC
-    """, p)
+    """, ([as_of] if as_of else []) + p)
 
 
 CLOSED_STAGES = ("Closed Won", "Closed Lost", "Closed Lost to Competition")
 
 
-def performance_weeks(n=3, owner=None):
-    """Oldest -> newest, left to right, matching how the source table reads."""
-    week_starts = list(reversed(weekly.weeks_available(limit=n)))
+def performance_weeks(n=3, owner=None, week=None):
+    """Oldest -> newest, left to right, matching how the source table reads.
+    The last column is `week` (default: this week)."""
+    anchor = week_bounds(week)[1] if week else None  # the week the period ends in
+    week_starts = list(reversed(weekly.weeks_available(limit=n, anchor=anchor)))
     out = []
     for wk in week_starts:
         start, end = week_bounds(wk)

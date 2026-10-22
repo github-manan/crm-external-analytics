@@ -1,52 +1,9 @@
-// CRMSurfr — reads the local read-only JSON API only.
+// MitKat GrowthIQ — reads the local read-only JSON API only.
 // See README.md "Read this before writing any query" before changing any query here.
 
 const API = '';
 
-const PALETTE = ['#1d4ed8', '#0891b2', '#d97706', '#7c3aed', '#dc2626', '#059669'];
-// resolvedTheme() (theme.js) respects an explicit toggle choice, falling
-// back to the OS preference - not just raw matchMedia, which would ignore
-// the toggle entirely.
-const dark = resolvedTheme() === 'dark';
-const GRID_COLOR = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-const TICK_COLOR = dark ? '#94a0b8' : '#64748b';
-
-// Chart.js loads from a CDN (index.html) - if that's unreachable (offline,
-// firewall, cdnjs down), `Chart` never gets defined. Previously every line
-// below ran at the top of this file regardless, so the very first one
-// (Chart.defaults.font...) threw immediately and silently killed this
-// entire script - not just charts, the whole page (tables, KPIs, filters,
-// everything) stopped initializing with nothing visible to say why.
-const CHARTS_AVAILABLE = typeof Chart !== 'undefined';
-if (!CHARTS_AVAILABLE) {
-  const banner = document.createElement('div');
-  banner.className = 'pill pill-warn';
-  banner.style.cssText = 'display:block;margin:0.75rem 1.4rem;padding:0.6rem 1rem;';
-  banner.textContent = 'Charts failed to load (Chart.js CDN unreachable) - numbers below are still live, just without graphs.';
-  document.body.insertBefore(banner, document.body.firstChild);
-}
-// Returns null instead of throwing when Chart.js isn't loaded - every
-// caller already uses optional chaining (chart?.destroy()) so a null
-// chart is a no-op, not a crash.
-function safeChart(ctx, config) {
-  return CHARTS_AVAILABLE ? new Chart(ctx, config) : null;
-}
-
-if (CHARTS_AVAILABLE) {
-  Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-  Chart.defaults.font.size = 12;
-  Chart.defaults.color = TICK_COLOR;
-  Chart.defaults.plugins.legend.labels.usePointStyle = true;
-  Chart.defaults.plugins.tooltip.backgroundColor = dark ? '#1c2436' : '#0f1729';
-  Chart.defaults.plugins.tooltip.titleColor = '#fff';
-  Chart.defaults.plugins.tooltip.bodyColor = dark ? '#d7deed' : '#e5e9f2';
-  Chart.defaults.plugins.tooltip.padding = 10;
-  Chart.defaults.plugins.tooltip.cornerRadius = 8;
-  Chart.defaults.plugins.tooltip.displayColors = false;
-  Chart.defaults.elements.line.borderWidth = 2.5;
-  Chart.defaults.elements.bar.borderRadius = 6;
-  Chart.defaults.elements.bar.borderSkipped = false;
-}
+// Chart colors, defaults and baseGrid() come from charts.js.
 
 function fmtCr(inr) {
   if (inr === null || inr === undefined) return '—';
@@ -85,17 +42,13 @@ async function getJSON(path) {
   return res.json();
 }
 
-function baseGrid(axis) {
-  return { grid: { color: GRID_COLOR }, ticks: { color: TICK_COLOR }, ...axis };
-}
-
 // ---------- top bar: connectivity + data notes ----------
 
 async function initTopbar() {
   const statusEl = document.getElementById('sync-status');
   try {
     const meta = await getJSON('/api/meta');
-    const lastSync = meta.last_sync?.[0]?.last_run_at;
+    const lastSync = meta.last_sync?.map((r) => r.last_run_at).sort().pop();
     statusEl.textContent = lastSync
       ? `synced ${new Date(lastSync).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`
       : 'connected';
@@ -179,11 +132,12 @@ function renderFiscalChart(rows) {
   fiscalChart = safeChart(ctx, {
     type: 'bar',
     data: {
-      labels: rows.map(r => r.fiscal_year),
+      // FY2024-25 -> FY24-25 on the axis so labels fit flat; tooltip keeps the full name
+      labels: rows.map(r => r.fiscal_year.replace(/^FY20/, 'FY')),
       datasets: [{
         label: 'Revenue (Cr)',
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
-        backgroundColor: PALETTE[0],
+        backgroundColor: CHART.series[0],
       }],
     },
     options: {
@@ -191,6 +145,7 @@ function renderFiscalChart(rows) {
         legend: { display: false },
         tooltip: {
           callbacks: {
+            title: (items) => rows[items[0].dataIndex].fiscal_year,
             label: (c) => {
               const r = rows[c.dataIndex];
               return [`Revenue: ${fmtCr(r.revenue_inr)}`, `Deals won: ${fmtInt(r.deals_won)}`];
@@ -200,7 +155,7 @@ function renderFiscalChart(rows) {
       },
       scales: {
         x: baseGrid({ grid: { display: false } }),
-        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
       },
     },
   });
@@ -217,15 +172,15 @@ function renderPipelinesChart(rows) {
     data: {
       labels: rows.map(r => r.pipeline),
       datasets: [
-        { label: 'Won', data: rows.map(r => +(r.won_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[0] },
-        { label: 'Open', data: rows.map(r => +(r.open_inr / 1e7).toFixed(2)), backgroundColor: PALETTE[2] },
+        { label: 'Won', data: rows.map(r => +(r.won_inr / 1e7).toFixed(2)), backgroundColor: CHART.series[0] },
+        { label: 'Open', data: rows.map(r => +(r.open_inr / 1e7).toFixed(2)), backgroundColor: CHART.series[1] },
       ],
     },
     options: {
       plugins: { legend: { position: 'bottom' } },
       scales: {
         x: baseGrid({ grid: { display: false } }),
-        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
       },
     },
   });
@@ -246,8 +201,8 @@ async function loadMonthlyChart(pipeline) {
       datasets: [{
         label: 'Revenue (Cr)',
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
-        borderColor: PALETTE[0],
-        backgroundColor: PALETTE[0] + '22',
+        borderColor: CHART.series[0],
+        backgroundColor: CHART.fill(CHART.series[0]),
         fill: true,
         tension: 0.25,
         pointRadius: 0,
@@ -266,8 +221,8 @@ async function loadMonthlyChart(pipeline) {
         },
       },
       scales: {
-        x: baseGrid({ ticks: { color: TICK_COLOR, maxTicksLimit: 14 }, grid: { display: false } }),
-        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        x: baseGrid({ ticks: { color: CHART.tick, maxTicksLimit: 14 }, grid: { display: false } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
       },
     },
   });
@@ -282,6 +237,7 @@ async function loadStagesChart(pipeline, allRows) {
     .sort((a, b) => a.stage_order - b.stage_order);
 
   const ctx = document.getElementById('chart-stages');
+  fitBarHeight(ctx, rows.length);
   stagesChart?.destroy();
   stagesChart = safeChart(ctx, {
     type: 'bar',
@@ -290,11 +246,12 @@ async function loadStagesChart(pipeline, allRows) {
       datasets: [{
         label: 'Open value (Cr)',
         data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)),
-        backgroundColor: PALETTE[1],
+        backgroundColor: CHART.series[0],
       }],
     },
     options: {
       indexAxis: 'y',
+      interaction: { mode: 'index', axis: 'y', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -307,7 +264,7 @@ async function loadStagesChart(pipeline, allRows) {
         },
       },
       scales: {
-        x: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        x: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
         y: baseGrid({ grid: { display: false } }),
       },
     },
@@ -326,7 +283,7 @@ function renderSeasonalityChart(rows) {
       labels: rows.map(r => monthName(r.month)),
       datasets: [{
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
-        backgroundColor: rows.map(r => (r.month === 4 || r.month === 3) ? PALETTE[2] : PALETTE[0]),
+        backgroundColor: rows.map(r => (r.month === 4 || r.month === 3) ? CHART.series[1] : CHART.series[0]),
       }],
     },
     options: {
@@ -343,7 +300,7 @@ function renderSeasonalityChart(rows) {
       },
       scales: {
         x: baseGrid({ grid: { display: false } }),
-        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
       },
     },
   });
@@ -360,13 +317,13 @@ function renderHistoryChart(rows) {
     ctx.getContext('2d').save();
     historyChart = safeChart(ctx, {
       type: 'line',
-      data: { labels: rows.map(r => r.snapshot_date), datasets: [{ label: 'Open value (Cr)', data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)), borderColor: PALETTE[3], backgroundColor: PALETTE[3], pointRadius: 5 }] },
+      data: { labels: rows.map(r => r.snapshot_date), datasets: [{ label: 'Open value (Cr)', data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)), borderColor: CHART.series[0], backgroundColor: CHART.series[0], pointRadius: 5 }] },
       options: {
         plugins: {
           legend: { display: false },
-          subtitle: { display: true, text: 'Only one day captured so far — this fills in day by day.', color: TICK_COLOR },
+          subtitle: { display: true, text: 'Only one day captured so far — this fills in day by day.', color: CHART.tick },
         },
-        scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }) },
+        scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }) },
       },
     });
     return;
@@ -379,15 +336,17 @@ function renderHistoryChart(rows) {
       datasets: [{
         label: 'Open value (Cr)',
         data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)),
-        borderColor: PALETTE[3],
-        backgroundColor: PALETTE[3] + '22',
+        borderColor: CHART.series[0],
+        backgroundColor: CHART.fill(CHART.series[0]),
         fill: true,
         tension: 0.2,
+        pointRadius: rows.length <= 20 ? 3 : 0,
+        pointBackgroundColor: CHART.series[0],
       }],
     },
     options: {
       plugins: { legend: { display: false } },
-      scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }) },
+      scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }) },
     },
   });
 }
@@ -411,9 +370,9 @@ async function loadRepTrendChart(owner, granularity, start, end) {
       options: {
         plugins: {
           legend: { display: false },
-          subtitle: { display: true, text: 'No won deals with a closing date in this selection.', color: TICK_COLOR },
+          subtitle: { display: true, text: 'No won deals with a closing date in this selection.', color: CHART.tick },
         },
-        scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }) },
+        scales: { x: baseGrid({ grid: { display: false } }), y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }) },
       },
     });
     return;
@@ -426,8 +385,8 @@ async function loadRepTrendChart(owner, granularity, start, end) {
       datasets: [{
         label: 'Revenue (Cr)',
         data: rows.map(r => +(r.revenue_inr / 1e7).toFixed(2)),
-        borderColor: PALETTE[0],
-        backgroundColor: PALETTE[0] + '22',
+        borderColor: CHART.series[0],
+        backgroundColor: CHART.fill(CHART.series[0]),
         fill: true,
         tension: 0.25,
         pointRadius: rows.length > 60 ? 0 : 3,
@@ -446,8 +405,8 @@ async function loadRepTrendChart(owner, granularity, start, end) {
         },
       },
       scales: {
-        x: baseGrid({ ticks: { color: TICK_COLOR, maxTicksLimit: 14 }, grid: { display: false } }),
-        y: baseGrid({ title: { display: true, text: '₹ Crore', color: TICK_COLOR } }),
+        x: baseGrid({ ticks: { color: CHART.tick, maxTicksLimit: 14 }, grid: { display: false } }),
+        y: baseGrid({ title: { display: true, text: '₹ Crore', color: CHART.tick } }),
       },
     },
   });
@@ -657,6 +616,29 @@ async function main() {
   }
 
   await loadDataQuality();
+
+  // One refresh button per card, each re-reading only that card's data.
+  const card = (id) => document.getElementById(id);
+  const fetchRows = async (path) => (await getJSON(withView(path))).rows;
+  const refreshKPIs = async () => {
+    const [fiscal, pipelines] = await Promise.all([fetchRows('/api/bookings/fiscal'), fetchRows('/api/pipelines')]);
+    await loadKPIs(pipelines, fiscal, meta);
+  };
+  document.querySelectorAll('.kpi-card').forEach((tile) => addRefresh(tile, refreshKPIs));
+  addRefresh(card('chart-fiscal'), async () => renderFiscalChart(await fetchRows('/api/bookings/fiscal')));
+  addRefresh(card('chart-pipelines'), async () => renderPipelinesChart(await fetchRows('/api/pipelines')));
+  addRefresh(card('chart-monthly'), () => loadMonthlyChart(card('pipeline-filter').value));
+  addRefresh(card('chart-stages'), async () => {
+    const rows = await fetchRows('/api/pipeline/open');
+    const stageFilter = card('stage-pipeline-filter');
+    stageFilter.onchange = () => loadStagesChart(stageFilter.value, rows); // keep the dropdown on the fresh rows
+    await loadStagesChart(stageFilter.value, rows);
+  });
+  addRefresh(card('chart-seasonality'), async () => renderSeasonalityChart(await fetchRows('/api/seasonality')));
+  addRefresh(card('chart-history'), async () => renderHistoryChart(await fetchRows('/api/pipeline/history')));
+  addRefresh(card('reps-table'), () => Promise.all([loadRepsTable(fyFilter.value), refreshRepTrend()]));
+  if (session.is_admin) addRefresh(card('activity-table'), () => loadUserActivity(card('activity-filter').value));
+  addRefresh(card('dq-table'), loadDataQuality);
 }
 
 main().catch(err => {

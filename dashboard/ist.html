@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CRMSurfr &mdash; IST Dashboard</title>
+<title>MitKat GrowthIQ &mdash; IST Dashboard</title>
 <script>try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="ist.css">
@@ -11,31 +11,58 @@
 <body>
 
 <header class="topbar">
-  <div class="topbar-title">
-    <div class="brand">
-      <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
-        <path d="M3.5 13.5c1.6-3 3.4-4.5 7.5-4.5s5.9 1.5 7.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M3.5 17c1.6-2.2 3.4-3.3 7.5-3.3s5.9 1.1 7.5 3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
-      </svg>
-      <span class="brand-word">CRM<span class="brand-accent">Surfr</span></span>
-    </div>
-    <nav class="dash-nav">
-      <a href="index.html">Overall</a>
-      <a href="weekly.html">Weekly Review</a>
-      <a href="ist.html" class="current">IST Dashboard</a>
-      <a href="chat.html">Assistant</a>
-    </nav>
-    <h1>IST Dashboard</h1>
-    <p class="subtitle">Replicates the native Zoho CRM Analytics dashboard &middot; rebuilt on our own read-only API</p>
+  <div class="brand">
+    <svg class="brand-mark" width="20" height="20" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="21" height="21" rx="6" fill="currentColor" opacity="0.14"/>
+      <rect x="5" y="12" width="3" height="5" rx="1" fill="currentColor" opacity="0.55"/>
+      <rect x="9.5" y="9" width="3" height="8" rx="1" fill="currentColor" opacity="0.8"/>
+      <rect x="14" y="5" width="3" height="12" rx="1" fill="currentColor"/>
+    </svg>
+    <span class="brand-word"><span class="brand-org">MitKat</span> Growth<span class="brand-accent">IQ</span></span>
   </div>
+  <nav class="dash-nav" aria-label="Dashboards">
+    <a href="index.html">Overall</a>
+    <a href="ist.html" class="current" aria-current="page">IST Dashboard</a>
+    <a href="chat.html">Assistant</a>
+  </nav>
   <div class="topbar-meta">
-    <label for="owner" class="card-note" style="margin-right:4px;">Owner</label>
-    <select id="owner"><option value="">All Users</option></select>
     <span id="sync-status" class="pill pill-muted">connecting&hellip;</span>
     <button id="notes-toggle" class="pill pill-warn" type="button">About this page</button>
   </div>
 </header>
+
+<section class="page-head">
+  <div>
+    <h1>IST Dashboard</h1>
+    <p class="subtitle" id="subtitle">Loading&hellip;</p>
+  </div>
+  <div class="page-filters">
+    <span class="filter-group">
+      <label for="owner">Owner</label>
+      <select id="owner"><option value="">All Users</option></select>
+    </span>
+    <span class="filter-group">
+      <label for="period">Period</label>
+      <select id="period">
+        <option value="this-week">This week</option>
+        <option value="last-week">Last week</option>
+        <option value="this-month">This month</option>
+        <option value="last-month">Last month</option>
+        <option value="last-90">Last 90 days</option>
+        <option value="this-fy">This fiscal year</option>
+        <option value="custom">Custom range</option>
+      </select>
+    </span>
+    <span class="filter-group">
+      <label for="date-from">From</label>
+      <input type="date" id="date-from">
+    </span>
+    <span class="filter-group">
+      <label for="date-to">To</label>
+      <input type="date" id="date-to">
+    </span>
+  </div>
+</section>
 
 <div id="notes-panel" class="notes-panel" hidden>
   <div class="notes-panel-head">
@@ -43,9 +70,11 @@
     <button id="notes-close" type="button" aria-label="Close">&times;</button>
   </div>
   <ul id="notes-list">
-    <li>KPI tiles compare to the <b>previous week</b> here, not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
+    <li>KPI tiles compare to the <b>previous period of the same length</b> (e.g. the week before, or the 30 days before), not "last year" &mdash; the source dashboard's comparison basis wasn't consistent from tile to tile.</li>
     <li><b>Deal Movement</b> is split by pipeline here (Consulting/Datasurfr/MSS/Renewal each have different stages) &mdash; the source dashboard blends all four into one axis, which the README explicitly warns against.</li>
-    <li>Lead Journey, Revenue Target and Leads by Source reuse the exact same definitions as the Weekly Review dashboard &mdash; one definition per metric, not a second copy.</li>
+    <li>Started as a copy of the native Zoho "IST Dashboard", then merged with the Weekly Review: every section follows the <b>Period</b> (pick a preset or any From/To dates).</li>
+    <li>For a period in the past, deals are shown as they stood on its last day, rebuilt from deal history. Owner and pipeline are today's values, and closing dates can be slightly off (Zoho only logs them on a stage change).</li>
+    <li><b>Lead status</b> and <b>Hot Leads</b> have no history in Zoho: for a past period they cover leads that existed by then, but with today's status and score.</li>
     <li>Zoho's own "Last 3 Months" table is actually 3 weeks by its date ranges &mdash; ours is honestly labeled as weeks.</li>
   </ul>
 </div>
@@ -53,10 +82,10 @@
 <main id="app">
 
   <section class="kpi-row" id="kpi-row" aria-label="Key metrics">
-    <div class="kpi-card skeleton"><span class="kpi-label">Leads this week</span><span class="kpi-value">&mdash;</span></div>
-    <div class="kpi-card skeleton"><span class="kpi-label">Revenue this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">New leads</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">Revenue won</span><span class="kpi-value">&mdash;</span></div>
     <div class="kpi-card skeleton"><span class="kpi-label">Deals in pipeline</span><span class="kpi-value">&mdash;</span></div>
-    <div class="kpi-card skeleton"><span class="kpi-label">Accounts this week</span><span class="kpi-value">&mdash;</span></div>
+    <div class="kpi-card skeleton"><span class="kpi-label">New accounts</span><span class="kpi-value">&mdash;</span></div>
   </section>
 
   <section class="grid-2">
@@ -66,13 +95,12 @@
         <div class="card-controls">
           <label for="source-scope">Scope</label>
           <select id="source-scope">
+            <option value="week" selected>Selected period</option>
             <option value="all">All-time</option>
-            <option value="week">This week</option>
           </select>
         </div>
       </div>
-      <canvas id="chart-sources" height="160"></canvas>
-      <div class="source-list" id="source-list"></div>
+      <div class="hbars" id="source-list"></div>
     </div>
 
     <div class="card">
@@ -84,34 +112,66 @@
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-head">
-      <h2>Revenue Target &mdash; This Month</h2>
-      <span class="card-note" id="target-month"></span>
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Revenue Target</h2>
+        <span class="card-note" id="target-month"></span>
+      </div>
+      <div class="target-head">
+        <div class="target-actual" id="target-actual">&mdash;</div>
+        <div class="target-of" id="target-of"></div>
+      </div>
+      <div class="target-track"><div class="target-fill" id="target-fill" style="width:0"></div></div>
+      <div class="target-foot"><span id="target-pct"></span><span id="target-gap"></span></div>
     </div>
-    <div class="target-head">
-      <div class="target-actual" id="target-actual">&mdash;</div>
-      <div class="target-of" id="target-of"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Deal Movement</h2>
+      </div>
+      <p class="card-note">Stage changes recorded in the selected period.</p>
+      <div class="move-summary" id="move-summary"></div>
     </div>
-    <div class="target-track"><div class="target-fill" id="target-fill" style="width:0"></div></div>
-    <div class="target-foot"><span id="target-pct"></span><span id="target-gap"></span></div>
   </section>
 
   <section class="card">
     <div class="card-head">
-      <h2>Deal Movement</h2>
+      <h2>What Moved</h2>
+      <span class="card-note">Every stage change in the selected period, newest first</span>
+    </div>
+    <div class="move-list" id="move-list"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Needs Attention</h2>
+      <span class="card-note" id="attention-note">The action list for the review call</span>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" type="button" data-tab="stuck" aria-selected="true">Stuck deals</button>
+      <button class="tab" role="tab" type="button" data-tab="slipped" aria-selected="false">Slipped close dates</button>
+      <button class="tab" role="tab" type="button" data-tab="closing" aria-selected="false">Closing in 30 days</button>
+    </div>
+    <div class="table-wrap attention" id="attention"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Deals by Stage</h2>
       <div class="card-controls">
         <label for="stage-pipeline">Pipeline</label>
         <select id="stage-pipeline"></select>
       </div>
     </div>
-    <p class="card-note">All deals by stage (open and closed), for the selected pipeline &mdash; never blended across pipelines.</p>
-    <canvas id="chart-stages" height="160"></canvas>
+    <p class="card-note" id="stage-note">All deals by stage (open and closed), for the selected pipeline &mdash; never blended across pipelines.</p>
+    <div class="chart-box"><canvas id="chart-stages"></canvas></div>
   </section>
 
   <section class="card">
     <div class="card-head">
-      <h2>Last 3 Weeks Performance Monitor</h2>
+      <h2>3-Week Performance Monitor</h2>
+      <span class="card-note">The 3 weeks up to the end of the period</span>
     </div>
     <div class="table-wrap">
       <table id="perf-table">
@@ -124,14 +184,15 @@
   <section class="card">
     <div class="card-head">
       <h2>Leads by Lead Status</h2>
+      <span class="card-note" id="status-note"></span>
     </div>
-    <canvas id="chart-status" height="170"></canvas>
+    <div class="chart-box"><canvas id="chart-status"></canvas></div>
   </section>
 
   <section class="card">
     <div class="card-head">
       <h2>Hot Leads</h2>
-      <span class="card-note">Respects the Owner filter above</span>
+      <span class="card-note" id="hot-note">Respects the Owner filter above</span>
     </div>
     <p class="card-note">Heuristic score (recency + historical source/industry conversion rate), not a prediction &mdash; see <a href="chat.html">Assistant</a> for the same scoring with more detail per lead.</p>
     <div class="table-wrap">
@@ -178,6 +239,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 <script src="theme.js"></script>
+<script src="charts.js"></script>
+<script src="refresh.js"></script>
 <script src="auth.js"></script>
 <script src="ist.js"></script>
 </body>

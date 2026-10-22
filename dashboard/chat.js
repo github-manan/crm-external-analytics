@@ -76,9 +76,7 @@ function renderToolData(toolCalls) {
 let insightsChartCounter = 0;
 const INSIGHTS_CHART_LIMIT = 8;
 
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+// cssVar() and CHART come from charts.js.
 
 function buildInsightsChartHtml(findings) {
   if (!findings || !findings.length) return '';
@@ -97,17 +95,17 @@ function renderInsightsChart(findings, canvasId) {
   // Chart.js loads from a CDN (chat.html) - if that failed, degrade to
   // text-only (the "Verified data" panel still has every finding) instead
   // of throwing here with nothing visible to say why the chart's missing.
-  if (typeof Chart === 'undefined') {
+  if (!CHARTS_AVAILABLE) {
     ctx.replaceWith(document.createTextNode('(chart unavailable - Chart.js failed to load; see Verified data below for every finding)'));
     return;
   }
 
-  const good = cssVar('--good') || '#15803d';
-  const warn = cssVar('--warn') || '#92400e';
-  const textMuted = cssVar('--text-muted') || '#64748b';
-  const gridColor = resolvedTheme() === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  const good = CHART.good;
+  const warn = cssVar('--warn');
+  const textMuted = CHART.tick;
+  const gridColor = CHART.grid;
 
-  new Chart(ctx, {
+  safeChart(ctx, {
     type: 'bar',
     data: {
       // Bare name only, e.g. "Renewal" not "Renewal (pipeline)" - the
@@ -130,6 +128,7 @@ function renderInsightsChart(findings, canvasId) {
     },
     options: {
       indexAxis: 'y',
+      interaction: { mode: 'index', axis: 'y', intersect: false },
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },

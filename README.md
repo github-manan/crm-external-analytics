@@ -49,7 +49,7 @@ The dashboard is hand-built — no BI platform. Two ways to get at the data.
 |---|---|---|
 | `dashboard/index.html` + `app.js` | Ankit | Overall - the CEO view: bookings, pipeline, seasonality, reps |
 | `dashboard/ist.html` + `ist.js` + `ist.css` | Ankit / Manan | IST Dashboard - the IST team's weekly view (absorbed the Weekly Review) |
-| `dashboard/chat.html` + `chat.js` + `chat.css` | Ankit | Assistant (local chatbot over the CRM data) |
+| `dashboard/chat.html` + `chat.js` + `chat.css` | Ankit | Assistant (Gemini chatbot over the CRM data; needs `GEMINI_API_KEY` in `.env`) |
 
 The IST Dashboard began as a copy of the native Zoho "IST Dashboard" and
 absorbed the old Weekly Review page (`weekly.html`, removed). Open it at

@@ -9,10 +9,9 @@ coverage, it's making sure none of those come back silently next time a
 tool description gets reworded or a new tool gets added.
 
 Needs a connected model - this calls chatbot.ask() for real, it does not
-mock the model. None is connected right now (Ollama removed, Gemini
-pending - see chatbot.py), so the suite stops with a message until then.
-The cases themselves are model-agnostic and are meant to be re-run
-against Gemini. Honest limitation: a model is not perfectly deterministic
+mock the model (Gemini - see chatbot.py), so it needs GEMINI_API_KEY in
+.env and spends API calls. Without a key the suite stops with a message.
+Honest limitation: a model is not perfectly deterministic
 - a single failure here might be run-to-run noise, not a real regression. Re-run before concluding a case is broken,
 and treat a case that fails consistently, not once, as the real signal.
 
@@ -194,7 +193,7 @@ def run_case(case):
 
 def main():
     if chatbot.ask("ping").get("unavailable"):
-        print("No AI model is connected (Ollama removed, Gemini pending) - nothing to test yet.")
+        print("No AI model is connected (GEMINI_API_KEY missing from .env) - nothing to test.")
         sys.exit(2)
     passed, failed = [], []
     for case in CASES:

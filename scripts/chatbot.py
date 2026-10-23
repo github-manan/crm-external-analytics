@@ -6,17 +6,11 @@ wrapper around an already-tested query from weekly.py / ist.py / this
 codebase's own views - the same numbers the dashboards show, nothing a
 model could invent or get wrong by writing bad SQL.
 
-NO MODEL IS CONNECTED RIGHT NOW. The local Ollama model was removed
-(2026-10-21) ahead of a move to Gemini; until that lands, ask() answers
-with ASSISTANT_UNAVAILABLE and calls nothing. Everything model-agnostic is
-kept for the Gemini integration: the tool functions (TOOLS), their schema
-(TOOL_SCHEMA), the system prompt (build_system_prompt), per-user scoping
-(run_tool) and the guaranteed-correct headlines (build_headline).
-
-Note for that move: the Ollama setup kept every CRM figure on this
-machine, per the original "no external LLM provider" constraint. Gemini
-is an external provider - tool results (CRM data) would be sent to Google
-- so that constraint needs an explicit decision before wiring it in.
+The model is Google Gemini (ask() below), called over its REST API with
+the key in .env (GEMINI_API_KEY; GEMINI_MODEL overrides the model). This
+replaced a local Ollama model on 2026-10-22. Gemini is an external
+provider: the question, the chat history and every tool result (CRM
+figures, deal and account names) are sent to Google to produce an answer.
 Read-only either way: nothing here can write to Zoho or to data/crm.db.
 
 One deliberate exception to "nothing leaves this machine": search_company_background
@@ -29,7 +23,10 @@ no-external-LLM rule, not bundled into it.
 
 import json
 import os
+import socket
 import sys
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
@@ -42,10 +39,28 @@ import adoption
 import insights
 from ddgs import DDGS
 
-# Flip to True once the Gemini call is wired into ask().
-MODEL_CONNECTED = False
-ASSISTANT_UNAVAILABLE = ("The Assistant is offline while it moves to a new AI model (Gemini). "
-                         "The IST Dashboard and Overall pages have the same numbers in the meantime.")
+ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+
+
+def _load_env():
+    """KEY=VALUE lines from .env into the environment (same format as zoho.py's)."""
+    if not os.path.exists(ENV_PATH):
+        return
+    for line in open(ENV_PATH):
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_env()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+MODEL_CONNECTED = bool(GEMINI_API_KEY)
+ASSISTANT_UNAVAILABLE = ("The Assistant isn't set up on this server - add GEMINI_API_KEY to .env "
+                         "and restart. The IST Dashboard and Overall pages have the same numbers in the meantime.")
 
 TODAY_NOTE = "Dates in this CRM's data run up to whatever the last daily sync captured - use get_weekly_kpis or ask the user for a specific period rather than assuming what 'today' is."
 
@@ -778,16 +793,112 @@ def run_tool(name, args, session=None):
     return args, strip_raw_money(result)
 
 
-def ask(user_message, history=None, session=None, upload=None):
+def gemini_tools():
+    """TOOL_SCHEMA in Gemini's functionDeclarations shape. A tool with no
+    parameters leaves "parameters" out - Gemini rejects an OBJECT schema
+    with empty properties."""
+    declarations = []
+    for tool in TOOL_SCHEMA:
+        fn = tool["function"]
+        declaration = {"name": fn["name"], "description": fn["description"]}
+        if fn.get("parameters", {}).get("properties"):
+            declaration["parameters"] = fn["parameters"]
+        declarations.append(declaration)
+    return [{"functionDeclarations": declarations}]
+
+
+def _post(payload):
+    request = urllib.request.Request(
+        GEMINI_URL, data=json.dumps(payload, default=str).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        return json.load(response)
+
+
+def _gemini_error(error):
+    """A short, key-free message for a failed Gemini call."""
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            detail = json.load(error).get("error", {}).get("message", "")
+        except (ValueError, AttributeError):
+            detail = ""
+        if error.code == 429:
+            return "Gemini's rate limit was hit - wait a minute and ask again."
+        return f"Gemini returned an error ({error.code}){': ' + detail[:200] if detail else ''}."
+    return f"Can't reach Gemini right now ({error}) - check the internet connection."
+
+
+def ask(user_message, history=None, session=None, upload=None, max_tool_rounds=5):
     """Answers one chat turn. Returns {reply, tool_calls, headline?}.
 
-    No model is connected (Ollama removed, Gemini pending - see the module
-    docstring), so this always returns ASSISTANT_UNAVAILABLE. The Gemini
-    version slots in here: send build_system_prompt(session, upload) +
-    history + user_message with TOOL_SCHEMA (withheld entirely when a
-    document is attached - the local model called tools on any company
-    name it saw, even with instructions not to), execute each requested
-    call through run_tool(), log {"tool", "args", "data"} per call, and
-    return build_headline(tool_log) alongside the model's reply.
+    session (from serve.py's auth.py) scopes every tool call to the asking
+    user's own data when they're not an admin - enforced in run_tool(), not
+    left to the model. upload, if given, is {"filename", "text",
+    "truncated"} for an attached document; its text goes into the system
+    prompt and is unverified, so there's no headline for it.
     """
-    return {"reply": ASSISTANT_UNAVAILABLE, "tool_calls": [], "unavailable": True}
+    if not MODEL_CONNECTED:
+        return {"reply": ASSISTANT_UNAVAILABLE, "tool_calls": [], "unavailable": True}
+
+    contents = []
+    for turn in (history or [])[-16:]:
+        text = (turn.get("content") or "").strip()
+        if text:
+            role = "model" if turn.get("role") == "assistant" else "user"
+            contents.append({"role": role, "parts": [{"text": text}]})
+    contents.append({"role": "user", "parts": [{"text": user_message}]})
+
+    payload = {
+        "systemInstruction": {"parts": [{"text": build_system_prompt(session, upload)}]},
+        "contents": contents,
+        # Low temperature: this restates business figures, it doesn't write creatively.
+        "generationConfig": {"temperature": 0.1},
+    }
+    # Tools are withheld while a document is attached, so an answer comes
+    # from the file or from the CRM, never a blend of the two.
+    if not upload:
+        payload["tools"] = gemini_tools()
+
+    tool_log = []
+    for _ in range(max_tool_rounds):
+        try:
+            data = _post(payload)
+        except (urllib.error.URLError, socket.timeout, ConnectionError) as error:
+            return {"reply": _gemini_error(error), "tool_calls": tool_log}
+
+        candidates = data.get("candidates") or []
+        if not candidates:
+            reason = (data.get("promptFeedback") or {}).get("blockReason", "no answer")
+            return {"reply": f"Gemini didn't answer that ({reason}) - try rephrasing.", "tool_calls": tool_log}
+        content = candidates[0].get("content") or {}
+        parts = content.get("parts") or []
+        calls = [part["functionCall"] for part in parts if "functionCall" in part]
+
+        if not calls:
+            reply = "".join(part.get("text", "") for part in parts if not part.get("thought")).strip()
+            return {"reply": reply or "Gemini returned an empty answer - try rephrasing.",
+                    "tool_calls": tool_log, "headline": build_headline(tool_log)}
+
+        # The model's turn goes back unchanged - it can carry thought
+        # signatures Gemini needs to continue the same reasoning.
+        payload["contents"].append({"role": "model", "parts": parts})
+        responses = []
+        for call_req in calls:
+            name = call_req.get("name", "")
+            args, result = run_tool(name, call_req.get("args") or {}, session)
+            # The UI's Verified Data panel shows these, so a mis-transcribed
+            # number in the prose can be checked against the real figure.
+            tool_log.append({"tool": name, "args": args, "data": result})
+            response = result if isinstance(result, dict) else {"result": result}
+            responses.append({"functionResponse": {"name": name,
+                                                   "response": json.loads(json.dumps(response, default=str))}})
+        payload["contents"].append({"role": "user", "parts": responses})
+
+    return {"reply": "That took more tool calls than expected - try asking a more specific question.",
+            "tool_calls": tool_log}
+
+
+if __name__ == "__main__":
+    question = " ".join(sys.argv[1:]) or "How many leads do we have?"
+    print(json.dumps(ask(question), indent=2, default=str, ensure_ascii=False))

@@ -1,7 +1,7 @@
-// CRM Assistant - talks only to our own /api/chat. No AI model is
-// connected right now (Ollama removed, Gemini pending - see chatbot.py),
-// so on load the page checks /api/chat/status and shows itself as offline
-// instead of letting someone type a question into nothing.
+// CRM Assistant - talks only to our own /api/chat, which answers with
+// Gemini (see chatbot.py). On load the page checks /api/chat/status and
+// shows itself as offline when the server has no GEMINI_API_KEY, instead
+// of letting someone type a question into nothing.
 // Read-only: this page cannot write anything to Zoho.
 
 // Redirects to login.html if not logged in; otherwise renders the

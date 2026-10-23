@@ -47,12 +47,12 @@
     </div>
     <div id="attachment-row" class="attachment-row" hidden>
       <span class="attachment-chip" id="attachment-chip"></span>
-      <button type="button" id="attachment-remove" class="attachment-remove" title="Remove attachment">&times;</button>
+      <button type="button" id="attachment-remove" class="attachment-remove" title="Remove attachment" aria-label="Remove attachment">&times;</button>
     </div>
     <div id="attachment-error" class="attachment-error" hidden></div>
     <form class="chat-input" id="chat-form">
       <input type="file" id="attachment-input" accept=".txt,.csv,.pdf,.xlsx" hidden>
-      <button type="button" id="attachment-button" class="attachment-button" title="Attach a document (.txt, .csv, .pdf, .xlsx)">&#128206;</button>
+      <button type="button" id="attachment-button" class="attachment-button" title="Attach a document (.txt, .csv, .pdf, .xlsx)" aria-label="Attach a document">&#128206;</button>
       <textarea id="chat-text" rows="1" placeholder="e.g. Which rep has the highest revenue this year?"></textarea>
       <button type="submit" id="chat-send">Ask</button>
     </form>

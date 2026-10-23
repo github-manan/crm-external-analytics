@@ -22,7 +22,11 @@ Or all three in order:
 ./scripts/daily.sh              # logs to logs/daily.log
 ```
 
-Database lands at `data/crm.db`. Stdlib Python 3 only — nothing to install.
+Database lands at `data/crm.db`. Stdlib Python 3 only for everything above —
+nothing to install. The AI assistant (`scripts/chatbot.py`, reached through
+`serve.py`) needs a `GEMINI_API_KEY` line in `.env`, plus three extra packages - `pip install -r requirements.txt` -
+for web search and document upload; dashboards and the sync itself still
+need nothing beyond stdlib.
 
 Then serve it to the dashboard:
 
@@ -34,7 +38,14 @@ Other output formats if needed:
 
 ```bash
 python3 scripts/export.py       # every view -> exports/*.csv
-python3 scripts/export_json.py  # aggregates -> dashboard/data/*.json
+python3 scripts/export_json.py  # aggregates -> dashboard/data/*.json - a
+                                 # no-server offline mode ONLY. Don't run
+                                 # this on a machine where serve.py is also
+                                 # how people normally use the dashboard -
+                                 # serve.py refuses to serve dashboard/data/
+                                 # itself, but there's no reason to create
+                                 # an unprotected copy of the data sitting
+                                 # next to a login-protected one.
 ```
 
 ---

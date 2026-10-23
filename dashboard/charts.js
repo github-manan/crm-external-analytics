@@ -25,33 +25,62 @@ const CHART = {
   fill: (hex) => hex + '24',
 };
 
-Chart.defaults.font.family = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-Chart.defaults.font.size = 11;
-Chart.defaults.color = CHART.tick;
-Chart.defaults.borderColor = CHART.grid;
-// Every canvas sits in a fixed-height .chart-box; aspect-ratio sizing is
-// what made the charts a full screen tall on a wide monitor.
-Chart.defaults.maintainAspectRatio = false;
-Chart.defaults.plugins.legend.labels.usePointStyle = true;
-Chart.defaults.plugins.legend.labels.boxWidth = 8;
-Chart.defaults.plugins.legend.labels.boxHeight = 8;
-Chart.defaults.plugins.tooltip.backgroundColor = cssVar('--tooltip-bg');
-Chart.defaults.plugins.tooltip.titleColor = cssVar('--tooltip-text');
-Chart.defaults.plugins.tooltip.bodyColor = cssVar('--tooltip-text');
-Chart.defaults.plugins.tooltip.padding = 8;
-Chart.defaults.plugins.tooltip.cornerRadius = 6;
-Chart.defaults.plugins.tooltip.displayColors = false;
-Chart.defaults.elements.line.borderWidth = 2;
-Chart.defaults.elements.point.radius = 0;
-Chart.defaults.elements.point.hoverRadius = 4;
-Chart.defaults.elements.bar.borderRadius = 4;
-Chart.defaults.elements.bar.borderSkipped = 'start';
-Chart.defaults.datasets.bar.maxBarThickness = 28;
-Chart.defaults.datasets.bar.categoryPercentage = 0.75;
-// Line charts: hovering anywhere in a column shows that column's tooltip.
-Chart.defaults.datasets.line.pointHitRadius = 8;
-Chart.defaults.interaction.mode = 'index';
-Chart.defaults.interaction.intersect = false;
+// Chart.js loads from a CDN in every page's <head> - if that's unreachable
+// (offline, firewall, cdnjs down), `Chart` never gets defined. This used to
+// be set up per-page (app.js/ist.js each had their own copy of this exact
+// block), and the unguarded version threw on the very first line below,
+// which silently killed that entire script - not just charts, the whole
+// page (tables, KPIs, filters, everything), since each page's own script
+// ran these lines at its own top level before anything else. Centralized
+// here now, so the guard only needs to exist in one place.
+const CHARTS_AVAILABLE = typeof Chart !== 'undefined';
+if (!CHARTS_AVAILABLE) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const banner = document.createElement('div');
+    banner.className = 'pill pill-warn';
+    banner.style.cssText = 'display:block;margin:0.75rem 1.4rem;padding:0.6rem 1rem;';
+    banner.textContent = 'Charts failed to load (Chart.js CDN unreachable) - numbers below are still live, just without graphs.';
+    document.body.insertBefore(banner, document.body.firstChild);
+  });
+}
+
+// Every page's own script calls this instead of `new Chart(...)` directly.
+// Returns null when Chart.js isn't loaded - every caller already uses
+// optional chaining (chart?.destroy()) so a null chart is a no-op, not a
+// crash, and the rest of that page's script keeps running either way.
+function safeChart(ctx, config) {
+  return CHARTS_AVAILABLE ? new Chart(ctx, config) : null;
+}
+
+if (CHARTS_AVAILABLE) {
+  Chart.defaults.font.family = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = CHART.tick;
+  Chart.defaults.borderColor = CHART.grid;
+  // Every canvas sits in a fixed-height .chart-box; aspect-ratio sizing is
+  // what made the charts a full screen tall on a wide monitor.
+  Chart.defaults.maintainAspectRatio = false;
+  Chart.defaults.plugins.legend.labels.usePointStyle = true;
+  Chart.defaults.plugins.legend.labels.boxWidth = 8;
+  Chart.defaults.plugins.legend.labels.boxHeight = 8;
+  Chart.defaults.plugins.tooltip.backgroundColor = cssVar('--tooltip-bg');
+  Chart.defaults.plugins.tooltip.titleColor = cssVar('--tooltip-text');
+  Chart.defaults.plugins.tooltip.bodyColor = cssVar('--tooltip-text');
+  Chart.defaults.plugins.tooltip.padding = 8;
+  Chart.defaults.plugins.tooltip.cornerRadius = 6;
+  Chart.defaults.plugins.tooltip.displayColors = false;
+  Chart.defaults.elements.line.borderWidth = 2;
+  Chart.defaults.elements.point.radius = 0;
+  Chart.defaults.elements.point.hoverRadius = 4;
+  Chart.defaults.elements.bar.borderRadius = 4;
+  Chart.defaults.elements.bar.borderSkipped = 'start';
+  Chart.defaults.datasets.bar.maxBarThickness = 28;
+  Chart.defaults.datasets.bar.categoryPercentage = 0.75;
+  // Line charts: hovering anywhere in a column shows that column's tooltip.
+  Chart.defaults.datasets.line.pointHitRadius = 8;
+  Chart.defaults.interaction.mode = 'index';
+  Chart.defaults.interaction.intersect = false;
+}
 
 function baseGrid(axis) {
   return {

@@ -94,13 +94,20 @@ function renderInsightsChart(findings, canvasId) {
   const shown = findings.slice(0, INSIGHTS_CHART_LIMIT);
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
+  // Chart.js loads from a CDN (chat.html) - if that failed, degrade to
+  // text-only (the "Verified data" panel still has every finding) instead
+  // of throwing here with nothing visible to say why the chart's missing.
+  if (!CHARTS_AVAILABLE) {
+    ctx.replaceWith(document.createTextNode('(chart unavailable - Chart.js failed to load; see Verified data below for every finding)'));
+    return;
+  }
 
   const good = CHART.good;
   const warn = cssVar('--warn');
   const textMuted = CHART.tick;
   const gridColor = CHART.grid;
 
-  new Chart(ctx, {
+  safeChart(ctx, {
     type: 'bar',
     data: {
       // Bare name only, e.g. "Renewal" not "Renewal (pipeline)" - the

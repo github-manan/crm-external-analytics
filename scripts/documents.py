@@ -95,3 +95,12 @@ def get_upload(upload_id, username):
     if not record or record["username"] != username:
         return None
     return record
+
+
+def clear_uploads(username):
+    """Called from auth.delete_session (serve.py's logout handler) - this
+    module's own docstring claimed uploads vanish on logout, but nothing
+    actually called this until now, so they only ever cleared on server
+    restart. Removes every upload belonging to this username."""
+    for upload_id in [k for k, v in UPLOADS.items() if v["username"] == username]:
+        del UPLOADS[upload_id]

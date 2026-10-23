@@ -17,6 +17,10 @@ function fmtInt(n) {
   return (n ?? 0).toLocaleString('en-IN');
 }
 
+// Rep/user names come from Zoho, not this app - escaped before going into
+// innerHTML so a name (however unlikely) can't inject markup.
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
 // "Admin MitKat" owns 3,341 of 10,547 leads at a 38% conversion rate vs.
 // 1-9% for every named rep with real volume (found while building the ML
 // baseline experiment) - almost certainly a bulk-import/default queue, not
@@ -125,7 +129,7 @@ let fiscalChart;
 function renderFiscalChart(rows) {
   const ctx = document.getElementById('chart-fiscal');
   fiscalChart?.destroy();
-  fiscalChart = new Chart(ctx, {
+  fiscalChart = safeChart(ctx, {
     type: 'bar',
     data: {
       // FY2024-25 -> FY24-25 on the axis so labels fit flat; tooltip keeps the full name
@@ -163,7 +167,7 @@ let pipelinesChart;
 function renderPipelinesChart(rows) {
   const ctx = document.getElementById('chart-pipelines');
   pipelinesChart?.destroy();
-  pipelinesChart = new Chart(ctx, {
+  pipelinesChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => r.pipeline),
@@ -190,7 +194,7 @@ async function loadMonthlyChart(pipeline) {
   const { rows } = await getJSON(withView('/api/bookings/monthly' + q));
   const ctx = document.getElementById('chart-monthly');
   monthlyChart?.destroy();
-  monthlyChart = new Chart(ctx, {
+  monthlyChart = safeChart(ctx, {
     type: 'line',
     data: {
       labels: rows.map(r => r.closing_month),
@@ -235,7 +239,7 @@ async function loadStagesChart(pipeline, allRows) {
   const ctx = document.getElementById('chart-stages');
   fitBarHeight(ctx, rows.length);
   stagesChart?.destroy();
-  stagesChart = new Chart(ctx, {
+  stagesChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => r.stage),
@@ -273,7 +277,7 @@ let seasonalityChart;
 function renderSeasonalityChart(rows) {
   const ctx = document.getElementById('chart-seasonality');
   seasonalityChart?.destroy();
-  seasonalityChart = new Chart(ctx, {
+  seasonalityChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => monthName(r.month)),
@@ -311,7 +315,7 @@ function renderHistoryChart(rows) {
 
   if (rows.length < 2) {
     ctx.getContext('2d').save();
-    historyChart = new Chart(ctx, {
+    historyChart = safeChart(ctx, {
       type: 'line',
       data: { labels: rows.map(r => r.snapshot_date), datasets: [{ label: 'Open value (Cr)', data: rows.map(r => +(r.value_inr / 1e7).toFixed(2)), borderColor: CHART.series[0], backgroundColor: CHART.series[0], pointRadius: 5 }] },
       options: {
@@ -325,7 +329,7 @@ function renderHistoryChart(rows) {
     return;
   }
 
-  historyChart = new Chart(ctx, {
+  historyChart = safeChart(ctx, {
     type: 'line',
     data: {
       labels: rows.map(r => r.snapshot_date),
@@ -360,7 +364,7 @@ async function loadRepTrendChart(owner, granularity, start, end) {
   repTrendChart?.destroy();
 
   if (!rows.length) {
-    repTrendChart = new Chart(ctx, {
+    repTrendChart = safeChart(ctx, {
       type: 'line',
       data: { labels: [], datasets: [{ label: 'Revenue (Cr)', data: [] }] },
       options: {
@@ -374,7 +378,7 @@ async function loadRepTrendChart(owner, granularity, start, end) {
     return;
   }
 
-  repTrendChart = new Chart(ctx, {
+  repTrendChart = safeChart(ctx, {
     type: 'line',
     data: {
       labels: rows.map(r => r.period),
@@ -425,7 +429,7 @@ async function loadRepsTable(fiscalYear) {
     .sort((a, b) => b.revenue_inr - a.revenue_inr)
     .map(r => `
       <tr>
-        <td>${ownerLabel(r.owner_name)}</td>
+        <td>${esc(ownerLabel(r.owner_name))}</td>
         <td class="num">${fmtInt(r.deals_won)}</td>
         <td class="num">${fmtCr(r.revenue_inr)}
           <span class="rank-bar" style="width:${Math.max(4, (r.revenue_inr / maxRevenue) * 60)}px"></span>
@@ -452,8 +456,8 @@ async function loadUserActivity(filterStatus) {
     }
     tbody.innerHTML = filtered.map(r => `
       <tr>
-        <td>${r.full_name}</td>
-        <td>${r.role ?? '—'}</td>
+        <td>${esc(r.full_name)}</td>
+        <td>${esc(r.role ?? '—')}</td>
         <td class="num">${fmtInt(r.deal_stage_changes)}</td>
         <td class="num">${fmtInt(r.logged_activities)}</td>
         <td>${r.last_activity ? `${r.last_activity.slice(0, 10)} (${r.days_since_last_activity}d ago)` : 'never'}</td>

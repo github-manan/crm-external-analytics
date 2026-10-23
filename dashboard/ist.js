@@ -289,7 +289,7 @@ function renderStages(rows, pipeline) {
   // Horizontal, so long stage names read without tilting
   fitBarHeight(ctx, filtered.length);
   stagesChart?.destroy();
-  stagesChart = new Chart(ctx, {
+  stagesChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: filtered.map(r => r.stage),
@@ -365,7 +365,7 @@ async function loadLeadStatus() {
   const ctx = document.getElementById('chart-status');
   fitBarHeight(ctx, rows.length, 22);
   statusChart?.destroy();
-  statusChart = new Chart(ctx, {
+  statusChart = safeChart(ctx, {
     type: 'bar',
     data: {
       labels: rows.map(r => r.status),
@@ -507,9 +507,15 @@ async function runSegmentLookup() {
     const variantsNote = data.matched_variants
       ? `<div class="seg-note">Matched variants merged: ${data.matched_variants.map(esc).join(', ')}</div>` : '';
     const warnNote = data.sample_size_warning ? `<div class="seg-warn">${esc(data.sample_size_warning)}</div>` : '';
+    // rate/companyRate can be null (a pipeline with zero decided - won or
+    // lost - deals, all still open) - segments.py returns null rather than
+    // dividing by zero, so this must not assume a number.
+    const headline = (rate === null || companyRate === null)
+      ? `${esc(data.value)}: not enough decided deals yet to compute a ${metricLabel}`
+      : `${esc(data.value)}: ${(rate * 100).toFixed(1)}% ${metricLabel}
+        vs ${(companyRate * 100).toFixed(1)}% company average (${data.vs_company})`;
     out.innerHTML = `
-      <div class="seg-headline">${esc(data.value)}: ${(rate * 100).toFixed(1)}% ${metricLabel}
-        vs ${(companyRate * 100).toFixed(1)}% company average (${data.vs_company})</div>
+      <div class="seg-headline">${headline}</div>
       <div class="seg-note">${esc(data.note || '')}</div>
       ${variantsNote}${warnNote}
     `;

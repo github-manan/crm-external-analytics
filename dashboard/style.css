@@ -115,6 +115,9 @@
 }
 
 * { box-sizing: border-box; }
+/* The hidden attribute always wins - a class setting display (e.g.
+   .card-controls) otherwise overrides it and shows a hidden element. */
+[hidden] { display: none !important; }
 html { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }

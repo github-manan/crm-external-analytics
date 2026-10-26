@@ -21,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weekly
 import segments
 import contacts
-import auth
 
 
 def check(name, condition, detail=""):
@@ -95,46 +94,6 @@ def main():
             "account contacts: admin (owner=None) sees it regardless",
             "error" not in admin_view,
             detail=str(admin_view),
-        ))
-
-    # --- login rate limiting ---
-    test_user = "__ratelimit_test_user_does_not_exist__"
-    for _ in range(auth.LOGIN_MAX_ATTEMPTS):
-        auth.authenticate(test_user, "wrong")
-    locked = auth._login_locked_out(test_user)
-    results.append(check(
-        f"login: locks out after {auth.LOGIN_MAX_ATTEMPTS} failed attempts",
-        locked,
-    ))
-    auth._FAILED_LOGINS.pop(test_user, None)  # don't leave test state behind
-
-    # --- session revalidation: promoting/demoting a real user invalidates ---
-    # --- their already-issued session, instead of waiting out the 12h TTL ---
-    import copy
-    users = auth.load_users()
-    test_username = next(iter(users), None)
-    if test_username:
-        backup = copy.deepcopy(users)
-        original_record = users[test_username]
-        token = auth.create_session({
-            "username": test_username,
-            "display_name": original_record.get("display_name", test_username),
-            "owner_name": original_record.get("owner_name"),
-            "is_admin": bool(original_record.get("is_admin")),
-        })
-        valid_right_after_login = auth.get_session(token) is not None
-        users[test_username]["is_admin"] = not bool(original_record.get("is_admin"))
-        auth.save_users(users)
-        invalid_after_role_change = auth.get_session(token) is None
-        auth.save_users(backup)  # restore immediately, regardless of outcome
-        results.append(check(
-            "sessions: valid immediately after login",
-            valid_right_after_login,
-        ))
-        results.append(check(
-            "sessions: a role change invalidates an already-issued session "
-            "(used to only take effect after the 12h TTL expired)",
-            invalid_after_role_change,
         ))
 
     print(f"\n{sum(results)}/{len(results)} passed.")

@@ -862,7 +862,7 @@ def _gemini_error(error):
 def ask(user_message, history=None, session=None, upload=None, max_tool_rounds=5):
     """Answers one chat turn. Returns {reply, tool_calls, headline?}.
 
-    session (from serve.py's auth.py) scopes every tool call to the asking
+    session (from serve.py's current_session()) scopes every tool call to the asking
     user's own data when they're not an admin - enforced in run_tool(), not
     left to the model. upload, if given, is {"filename", "text",
     "truncated"} for an attached document; its text goes into the system

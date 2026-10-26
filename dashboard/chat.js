@@ -4,11 +4,6 @@
 // of letting someone type a question into nothing.
 // Read-only: this page cannot write anything to Zoho.
 
-// Redirects to login.html if not logged in; otherwise renders the
-// "logged in as / Logout" pill. Scoping itself happens server-side in
-// serve.py/chatbot.py, not here - this is just the page gate + UI.
-requireSession();
-
 const state = { history: [], uploadId: null, uploadFilename: null };
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // keep in sync with documents.py's MAX_FILE_BYTES
 

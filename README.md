@@ -45,7 +45,7 @@ python3 scripts/export_json.py  # aggregates -> dashboard/data/*.json - a
                                  # serve.py refuses to serve dashboard/data/
                                  # itself, but there's no reason to create
                                  # an unprotected copy of the data sitting
-                                 # next to a login-protected one.
+                                 # next to the API-served one.
 ```
 
 ---
@@ -133,12 +133,10 @@ modify data.
 | `/api/pipeline/history` | open pipeline over time, from the snapshots |
 | `/api/seasonality` | won revenue by calendar month |
 | `/api/reps` | per-owner won/open; `?fiscal_year=FY2025-26` to filter |
-| `/api/view/<name>` | any view as rows; `?limit=` (default 50k) |
-| `/api/query?sql=SELECT...` | arbitrary read-only SELECT |
 
-`/api/query` takes a single bare `SELECT` — anything else is rejected. Use it
-for charts the fixed endpoints don't cover, and tell me if one is worth
-promoting to a real endpoint.
+There's no login and no raw-SQL endpoint: the app sits behind the
+internal.datasurfr.ai login, and every viewer sees all the data, so a new
+chart gets its own endpoint here rather than running arbitrary SQL.
 
 ```js
 const res  = await fetch('/api/bookings/fiscal');

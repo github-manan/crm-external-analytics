@@ -555,8 +555,7 @@ async function loadOverviewData(meta) {
 }
 
 async function main() {
-  const session = await requireSession();
-  if (!session) return; // already redirected to login.html
+  const session = await getViewer();
 
   const meta = await initTopbar();
   if (!meta) return; // API down — nothing else will load either

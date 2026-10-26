@@ -556,8 +556,7 @@ async function loadAll() {
 }
 
 async function main() {
-  const session = await requireSession();
-  if (!session) return; // already redirected to login.html
+  const session = await getViewer();
 
   const ok = await initTopbar();
   if (!ok) return;

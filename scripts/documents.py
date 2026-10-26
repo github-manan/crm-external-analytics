@@ -20,22 +20,34 @@ explicitly a weaker guarantee than every other answer in this app, and
 chatbot.py's prompt says so to the model, and the UI should say so to the
 user too.
 
-Uploads are held in memory only, per uploader (never written to disk,
-never shared between users - checked by username, not just by having the
-upload_id). They vanish on logout or server restart - same simplification
-already accepted for login sessions in auth.py, not a new risk.
+Uploads are held in memory only (never written to disk), under a random
+upload_id only the uploading browser knows. There's no login to tie them
+to, so they expire on their own: after UPLOAD_TTL_SECONDS, or when more
+than MAX_UPLOADS are held (oldest first), and on server restart.
 """
 
 import io
 import os
 import secrets
+import time
 
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
 MAX_CHARS = 12_000  # keeps the extracted text a sane size for the model's context window
 SUPPORTED_EXTENSIONS = (".txt", ".csv", ".pdf", ".xlsx")
 
-# upload_id -> {"username", "filename", "text", "truncated"}
+UPLOAD_TTL_SECONDS = 2 * 3600
+MAX_UPLOADS = 50
+
+# upload_id -> {"username", "filename", "text", "truncated", "created_at"}
 UPLOADS = {}
+
+
+def _evict_old_uploads():
+    now = time.time()
+    for upload_id in [k for k, v in UPLOADS.items() if now - v["created_at"] > UPLOAD_TTL_SECONDS]:
+        UPLOADS.pop(upload_id, None)
+    for upload_id in sorted(UPLOADS, key=lambda k: UPLOADS[k]["created_at"])[:max(0, len(UPLOADS) - MAX_UPLOADS)]:
+        UPLOADS.pop(upload_id, None)
 
 
 def _extract_pdf(content_bytes):
@@ -80,7 +92,9 @@ def store_upload(username, filename, content_bytes):
     upload_id = secrets.token_hex(16)
     UPLOADS[upload_id] = {
         "username": username, "filename": filename, "text": text, "truncated": truncated,
+        "created_at": time.time(),
     }
+    _evict_old_uploads()
     return {
         "upload_id": upload_id, "filename": filename,
         "char_count": len(text), "truncated": truncated,
@@ -91,16 +105,9 @@ def get_upload(upload_id, username):
     """Returns the upload record only if it belongs to this username -
     the same ownership check everywhere else in this app uses, applied to
     uploads too. Returns None if missing or owned by someone else."""
+    _evict_old_uploads()
     record = UPLOADS.get(upload_id)
     if not record or record["username"] != username:
         return None
     return record
 
-
-def clear_uploads(username):
-    """Called from auth.delete_session (serve.py's logout handler) - this
-    module's own docstring claimed uploads vanish on logout, but nothing
-    actually called this until now, so they only ever cleared on server
-    restart. Removes every upload belonging to this username."""
-    for upload_id in [k for k, v in UPLOADS.items() if v["username"] == username]:
-        del UPLOADS[upload_id]

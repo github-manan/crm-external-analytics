@@ -8,16 +8,14 @@ Serves two things:
 
 The database is opened read-only, so nothing served here can modify data.
 
-Login required for everything except /login.html and /api/auth/login (see
-auth.py). A user tied to one owner_name always gets their own data back,
-no matter what an "owner" query param or a chatbot tool-call argument asks
-for - that's enforced here (scoped_owner()) and in chatbot.py, not left to
-the frontend or the model to get right. /api/query and /api/view/<name>
-return raw, unfiltered rows with no owner scoping at all, so they're
-admin-only.
+No login of its own: the app sits behind internal.datasurfr.ai, whose
+Microsoft login decides who can reach it at all, and every viewer sees
+all the data (current_session() returns VIEWER). Per-rep scoping is
+still wired through scoped_owner() and chatbot.py, so it can come back by
+having current_session() build the session from the identity the platform
+passes in. Never expose this port directly - only behind that platform.
 
 Usage:
-    python3 scripts/auth.py add <you> --admin   # once, before first run
     python3 scripts/serve.py                     # http://localhost:8420
     python3 scripts/serve.py 9000                 # custom port
 """
@@ -30,7 +28,6 @@ import os
 import re
 import sqlite3
 import sys
-import threading
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,18 +38,18 @@ import segments
 import contacts
 import data_quality
 import chatbot
-import auth
 import adoption
 import documents
 
-# Holds the current request's session per-thread (ThreadingHTTPServer gives
-# each request its own thread) so endpoint functions can read "who's asking"
-# without every one of them needing a session parameter threaded through.
-_local = threading.local()
+# Who's asking. There's no login, so it's always the same full-access
+# viewer. If the platform later passes the signed-in user, build their
+# session here ({"username", "display_name", "owner_name", "is_admin"})
+# and the owner scoping below and in chatbot.py applies again.
+VIEWER = {"username": "viewer", "display_name": "Viewer", "owner_name": None, "is_admin": True}
 
 
 def current_session():
-    return getattr(_local, "session", None)
+    return VIEWER
 
 
 def scoped_owner(query):
@@ -92,16 +89,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "crm.db")
 STATIC_DIR = os.path.join(ROOT, "dashboard")
 DEFAULT_PORT = 8420
-
-# Only a single bare SELECT is accepted on /api/query. Guards against a typo
-# in a dashboard doing damage - though the read-only connection is the real
-# protection.
-SELECT_ONLY = re.compile(r"^\s*select\s", re.IGNORECASE)
-FORBIDDEN = re.compile(
-    r"\b(attach|detach|pragma|insert|update|delete|drop|create|alter|replace|vacuum)\b",
-    re.IGNORECASE,
-)
-
 
 def db():
     """Read-only connection. Rows come back as dicts."""
@@ -154,17 +141,6 @@ def ep_meta(_):
             "lost_reason_misused holds billing frequency, not loss reasons.",
         ],
     }
-
-
-def ep_views(_):
-    return {"views": view_names()}
-
-
-def ep_view(query, name):
-    if name not in view_names():
-        return {"error": f"unknown view '{name}'", "views": view_names()}, 404
-    limit = min(int(query.get("limit", ["50000"])[0]), 100000)
-    return {"view": name, "rows": rows(f"SELECT * FROM {name} LIMIT ?", (limit,))}
 
 
 def ep_bookings_fiscal(query):
@@ -293,19 +269,6 @@ def ep_pipelines(query):
             GROUP BY pipeline ORDER BY won_inr DESC""", params)}
 
 
-def ep_query(query):
-    """Arbitrary read-only SELECT, for charts the fixed endpoints don't cover."""
-    sql = query.get("sql", [""])[0]
-    if not sql:
-        return {"error": "pass ?sql=SELECT..."}, 400
-    if not SELECT_ONLY.match(sql) or FORBIDDEN.search(sql) or ";" in sql.rstrip(";"):
-        return {"error": "only a single SELECT statement is allowed"}, 400
-    try:
-        return {"sql": sql, "rows": rows(sql)}
-    except sqlite3.Error as error:
-        return {"error": str(error)}, 400
-
-
 # --- Weekly dashboard -------------------------------------------------------
 
 def _wk(query):
@@ -415,11 +378,8 @@ def ep_chat_status(_query):
             "message": None if chatbot.MODEL_CONNECTED else chatbot.ASSISTANT_UNAVAILABLE}
 
 
-def ep_auth_me(_query):
-    session = current_session()
-    if not session:
-        return {"error": "not authenticated"}, 401
-    return {k: v for k, v in session.items() if k != "expires_at"}
+def ep_me(_query):
+    return current_session()
 
 
 def ep_user_activity(_query):
@@ -427,7 +387,7 @@ def ep_user_activity(_query):
 
 
 ROUTES = {
-    "/api/auth/me": ep_auth_me,
+    "/api/me": ep_me,
     "/api/chat/status": ep_chat_status,
     "/api/users/activity": ep_user_activity,
     "/api/leads/hot": ep_leads_hot,
@@ -444,7 +404,6 @@ ROUTES = {
     "/api/ist/lead_status": ep_ist_lead_status,
     "/api/ist/performance": ep_ist_performance,
     "/api/meta": ep_meta,
-    "/api/views": ep_views,
     "/api/bookings/fiscal": ep_bookings_fiscal,
     "/api/bookings/monthly": ep_bookings_monthly,
     "/api/pipeline/open": ep_pipeline_open,
@@ -453,14 +412,13 @@ ROUTES = {
     "/api/reps/timeseries": ep_rep_timeseries,
     "/api/seasonality": ep_seasonality,
     "/api/pipelines": ep_pipelines,
-    "/api/query": ep_query,
 }
 
 
 def ep_chat(body):
-    """The only endpoint that isn't a plain read of the views - it calls a
-    local (never external) LLM, which itself can only call the same
-    read-only tool functions the rest of this API exposes. See chatbot.py.
+    """The only endpoint that isn't a plain read of the views - it calls
+    Gemini, which itself can only call the same read-only tool functions
+    the rest of this API exposes. See chatbot.py.
     The session is passed through so chatbot.ask() can force every
     owner-scoped tool call to the asking user's own data (non-admins) -
     same enforcement principle as scoped_owner() above, applied to the
@@ -511,14 +469,8 @@ POST_ROUTES = {
     "/api/chat/upload": ep_upload,
 }
 
-# These return raw, unfiltered rows from any view with no owner scoping at
-# all - fine when only one trusted person ever used this tool, a real gap
-# now that different reps have their own logins. Locked to admin only.
-ADMIN_ONLY_PREFIXES = ("/api/view/",)
-ADMIN_ONLY_ROUTES = {"/api/query", "/api/users/activity"}
-
-# Rendered without a session - everything else requires one.
-PUBLIC_PAGES = {"/login.html"}
+# Names every CRM user - admin only once viewers have their own identity.
+ADMIN_ONLY_ROUTES = {"/api/users/activity"}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -533,14 +485,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
-    def _session_token(self):
-        for part in self.headers.get("Cookie", "").split(";"):
-            if "=" in part:
-                k, v = part.strip().split("=", 1)
-                if k == "session":
-                    return v
-        return None
-
     def _write_json(self, result, status=200):
         if isinstance(result, tuple):
             result, status = result
@@ -552,78 +496,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _set_session_cookie(self, token, max_age):
-        self.send_header("Set-Cookie", f"session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}")
-
-    def _handle_login(self, body):
-        username = (body or {}).get("username", "").strip()
-        password = (body or {}).get("password", "")
-        user = auth.authenticate(username, password)
-        if not user:
-            return self._write_json({"error": "invalid username or password"}, 401)
-        token = auth.create_session(user)
-        payload = json.dumps(user).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self._set_session_cookie(token, auth.SESSION_TTL_SECONDS)
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def _handle_logout(self):
-        session = auth.get_session(self._session_token())
-        auth.delete_session(self._session_token())
-        if session:
-            documents.clear_uploads(session["username"])
-        payload = b'{"ok": true}'
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self._set_session_cookie("", 0)
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        session = auth.get_session(self._session_token())
-        _local.session = session
+        session = current_session()
 
         if not parsed.path.startswith("/api"):
-            # export_json.py writes raw, unfiltered data dumps straight into
-            # dashboard/data/ (its own docstring: "for a dashboard that ships
-            # as plain files, no server running"). That's a separate,
-            # no-login deployment mode - but dashboard/ is also this server's
-            # own static dir, and the check below only ever gated .html
-            # paths, so if that export ever runs while this login-protected
-            # server is the one actually in use, anyone who can reach it
-            # could fetch the full dump with no session at all. Blocked
-            # outright, logged in or not - a real session gets its data
-            # through /api/* like everything else already does.
+            # export_json.py writes raw, unfiltered data dumps into
+            # dashboard/data/ for a separate no-server mode. dashboard/ is
+            # also this server's static dir, so never serve that folder -
+            # data goes out through /api/* only.
             if parsed.path.startswith("/data/") or parsed.path == "/data":
                 return self._write_json({"error": "not served here - use /api/*"}, 403)
-            is_html_page = parsed.path in ("", "/") or parsed.path.endswith(".html")
-            if is_html_page and parsed.path not in PUBLIC_PAGES and not session:
-                self.send_response(302)
-                self.send_header("Location", "/login.html")
-                self.end_headers()
-                return
             return super().do_GET()  # static file from dashboard/
 
-        if not session:
-            return self._write_json({"error": "not authenticated"}, 401)
-
         query = urllib.parse.parse_qs(parsed.query)
-        is_admin_route = parsed.path in ADMIN_ONLY_ROUTES or parsed.path.startswith(ADMIN_ONLY_PREFIXES)
-        if is_admin_route and not session.get("is_admin"):
+        if parsed.path in ADMIN_ONLY_ROUTES and not session.get("is_admin"):
             return self._write_json({"error": "admin only"}, 403)
 
         try:
             if parsed.path in ROUTES:
                 result = ROUTES[parsed.path](query)
-            elif parsed.path.startswith("/api/view/"):
-                result = ep_view(query, parsed.path[len("/api/view/"):])
             elif parsed.path in ("/api", "/api/"):
-                result = {"endpoints": sorted(ROUTES) + sorted(POST_ROUTES) + ["/api/view/<view_name>"]}
+                result = {"endpoints": sorted(ROUTES) + sorted(POST_ROUTES)}
             else:
                 result = ({"error": f"no such endpoint '{parsed.path}'",
                            "endpoints": sorted(ROUTES)}, 404)
@@ -654,16 +548,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             return self._write_json({"error": "invalid JSON body"}, 400)
 
-        if parsed.path == "/api/auth/login":
-            return self._handle_login(body)
-        if parsed.path == "/api/auth/logout":
-            return self._handle_logout()
-
-        session = auth.get_session(self._session_token())
-        _local.session = session
-        if not session:
-            return self._write_json({"error": "not authenticated"}, 401)
-
         if parsed.path not in POST_ROUTES:
             return self._write_json({"error": f"no such endpoint '{parsed.path}'"}, 404)
 
@@ -681,17 +565,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 def main():
     if not os.path.exists(DB_PATH):
         sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
-    if not os.path.exists(auth.USERS_PATH):
-        sys.exit(f"{auth.USERS_PATH} not found - create a login first: python3 scripts/auth.py add <username> --admin")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
     os.makedirs(STATIC_DIR, exist_ok=True)
 
-    # Defaults to localhost (nobody but this machine can reach it) exactly
-    # as before - logins are the new access control, not network isolation,
-    # but a laptop shouldn't start listening on the LAN without someone
-    # deciding that on purpose. Set CRM_BIND_HOST=0.0.0.0 to let other
-    # machines on the network reach it once that's actually wanted (may
-    # also need a Windows Firewall rule for this port).
+    # Defaults to localhost: there's no login, so only this machine (or the
+    # platform's reverse proxy on the same server) should reach it. Don't
+    # set CRM_BIND_HOST=0.0.0.0 unless something in front controls access.
     host = os.environ.get("CRM_BIND_HOST", "localhost")
 
     try:
@@ -713,7 +592,6 @@ def main():
     print(f"  endpoints:  http://{host}:{port}/api")
     print(f"  static dir: {STATIC_DIR}/  (put index.html here)")
     print(f"  database is opened read-only")
-    print(f"  logins: {auth.USERS_PATH} ({len(auth.load_users())} user(s))")
     print("  press Ctrl+C to stop\n")
 
     try:

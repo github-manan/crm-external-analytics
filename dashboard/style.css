@@ -331,33 +331,6 @@ tbody tr:hover { background: var(--surface-2); }
 .foot { text-align: center; color: var(--text-muted); font-size: 0.74rem; padding: 1rem 1rem 0; }
 .foot code { background: var(--surface-2); border: 1px solid var(--border); padding: 0.05rem 0.35rem; border-radius: 4px; }
 
-/* --- Login page ----------------------------------------------------------- */
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-.login-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; }
-.login-card .brand { margin-bottom: 0.9rem; }
-.login-card input {
-  width: 100%;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.7rem;
-  font: inherit;
-  margin-top: 0.25rem;
-}
-.login-card button {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.55rem;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.login-card button:hover { background: var(--accent-2); }
-.login-card button:disabled { opacity: 0.6; cursor: default; }
-.login-error { color: var(--bad); font-size: 0.8rem; margin-top: 0.6rem; }
 
 @media (max-width: 900px) {
   .grid-2 { grid-template-columns: 1fr; }

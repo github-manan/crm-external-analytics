@@ -44,8 +44,13 @@ class ZohoError(RuntimeError):
 
 
 def load_env():
+    """.env is for local runs; on a server the same names come from the
+    real environment, which always wins (setdefault)."""
     if not os.path.exists(ENV_PATH):
-        raise SystemExit(f"{ENV_PATH} not found - run scripts/authorize.py first.")
+        if not os.environ.get("ZOHO_REFRESH_TOKEN"):
+            raise SystemExit(f"No Zoho credentials - set the ZOHO_* variables (see .env.example), "
+                             f"or run scripts/authorize.py to create {ENV_PATH}.")
+        return
     for line in open(ENV_PATH):
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:

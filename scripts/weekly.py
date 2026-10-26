@@ -15,16 +15,11 @@ status set to Contacted, so counting status strictly makes the funnel widen
 at step two.
 """
 
-import json
-import os
-import sqlite3
 from datetime import date, datetime, timedelta
 
+import db
 import transform
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
-TARGETS_PATH = os.path.join(ROOT, "config", "targets.json")
+from db import rows, one  # noqa: F401 - re-exported; ist/leads/... import them from here
 
 # "Admin MitKat" owns 3,341 of 10,547 leads at a 38% conversion rate vs.
 # 1-9% for every named rep with real volume (found during the ML baseline
@@ -37,22 +32,6 @@ NON_INDIVIDUAL_OWNERS = {"Admin MitKat"}
 CONTACTED_STATUSES = ("Contacted", "Attempted to Contact")
 STUCK_AFTER_DAYS = 21
 CLOSING_SOON_DAYS = 30
-
-
-def db():
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def rows(sql, params=()):
-    with db() as conn:
-        return [dict(r) for r in conn.execute(sql, params)]
-
-
-def one(sql, params=()):
-    result = rows(sql, params)
-    return result[0] if result else {}
 
 
 def week_start(value=None):
@@ -112,7 +91,7 @@ def as_of_date(week):
 
 
 def _history_stage(expr):
-    return expr.replace("json_extract(payload, '$.Stage')", "r.stage_raw")
+    return expr.replace(transform.STAGE, "r.stage_raw")
 
 
 # One ? parameter: the as-of date. Produces a CTE named `asof` shaped like
@@ -128,9 +107,9 @@ DEALS_AS_OF = f"""
         SELECT h.deal_id, h.stage_raw, h.amount_inr, h.probability,
                h.closing_date, h.changed_at,
                ROW_NUMBER() OVER (PARTITION BY h.deal_id
-                                  ORDER BY h.changed_at DESC, h.id DESC) rn
+                                  ORDER BY h.changed_at_exact DESC, h.id DESC) rn
         FROM v_deal_history h
-        WHERE date(h.changed_at) <= ?
+        WHERE substr(h.changed_at, 1, 10) <= ?
     ),
     asof AS (
         SELECT d.id, d.deal_name, d.owner_name, d.pipeline, d.contact_id,
@@ -139,8 +118,8 @@ DEALS_AS_OF = f"""
                {_history_stage(transform.STAGE_ORDER)} AS stage_order,
                r.amount_inr, r.probability, r.closing_date,
                r.changed_at AS last_change,
-               r.stage_raw = 'Closed Won' AS is_won,
-               r.stage_raw NOT LIKE 'Closed%' AS is_open
+               {transform.flag("r.stage_raw = 'Closed Won'")} AS is_won,
+               {transform.flag("r.stage_raw NOT LIKE 'Closed%'")} AS is_open
         FROM asof_ranked r
         JOIN v_deals d ON d.id = r.deal_id
         WHERE r.rn = 1
@@ -161,7 +140,7 @@ def kpis(week=None, owner=None):
     def leads_in(a, b):
         w, p = owner_clause(owner)
         return one(f"""SELECT COUNT(*) n FROM v_leads
-                       WHERE date(created_time) BETWEEN ? AND ?{w}""", [a, b] + p).get("n", 0)
+                       WHERE substr(created_time, 1, 10) BETWEEN ? AND ?{w}""", [a, b] + p).get("n", 0)
 
     def revenue_in(a, b):
         # closing_date_effective, not closing_date - 93 won deals have no
@@ -178,7 +157,7 @@ def kpis(week=None, owner=None):
         w, p = owner_clause(owner)
         return one(f"""SELECT COUNT(DISTINCT converted_account_id) n FROM v_leads
                        WHERE is_converted = 1 AND converted_account_id IS NOT NULL
-                         AND date(converted_date) BETWEEN ? AND ?{w}""", [a, b] + p).get("n", 0)
+                         AND substr(converted_date, 1, 10) BETWEEN ? AND ?{w}""", [a, b] + p).get("n", 0)
 
     w, p = owner_clause(owner)
     as_of = as_of_date(week)
@@ -220,14 +199,14 @@ def lead_sources(week=None, owner=None, scope="week"):
     if scope == "week":
         start, end = week_bounds(week)
         return rows(f"""SELECT COALESCE(lead_source,'(not set)') source, COUNT(*) n
-                        FROM v_leads WHERE date(created_time) BETWEEN ? AND ?{w}
-                        GROUP BY source ORDER BY n DESC""", [start, end] + p)
+                        FROM v_leads WHERE substr(created_time, 1, 10) BETWEEN ? AND ?{w}
+                        GROUP BY source ORDER BY n DESC, source""", [start, end] + p)
     # All-time for a past week means "every lead created up to that week".
     as_of = as_of_date(week)
-    created = " AND date(created_time) <= ?" if as_of else ""
+    created = " AND substr(created_time, 1, 10) <= ?" if as_of else ""
     return rows(f"""SELECT COALESCE(lead_source,'(not set)') source, COUNT(*) n
                     FROM v_leads WHERE 1=1{created}{w}
-                    GROUP BY source ORDER BY n DESC LIMIT 12""",
+                    GROUP BY source ORDER BY n DESC, source LIMIT 12""",
                 ([as_of] if as_of else []) + p)
 
 
@@ -241,7 +220,7 @@ def journey(week=None, owner=None, scope="all"):
     date_filter, date_params = "", []
     if scope == "week":
         start, end = week_bounds(week)
-        date_filter = " AND date(l.created_time) BETWEEN ? AND ?"
+        date_filter = " AND substr(l.created_time, 1, 10) BETWEEN ? AND ?"
         date_params = [start, end]
     else:
         as_of = as_of_date(week)
@@ -249,12 +228,9 @@ def journey(week=None, owner=None, scope="all"):
             return _journey_as_of(as_of, owner)
 
     statuses = ",".join("?" for _ in CONTACTED_STATUSES)
-    # EXISTS rather than a LEFT JOIN to v_deals: SQLite won't push the
-    # idx_deals_contact_id expression index through a LEFT JOIN across two
-    # views, so the join was a full nested-loop scan (~35s on the full
-    # dataset). The EXISTS form lets the planner use the index per lead
-    # (~0.3s) and returns identical counts - verified against the join form
-    # before switching.
+    # EXISTS rather than a LEFT JOIN to v_deals: the per-lead lookup uses
+    # the idx_deals_contact_id expression index (transform.py). As a plain
+    # join this was a ~35s nested-loop scan on SQLite.
     r = one(f"""
         SELECT
             COUNT(DISTINCT l.id) lead,
@@ -280,7 +256,7 @@ def _journey_as_of(as_of, owner):
     so that one step can read slightly high for an old week."""
     w, p = owner_clause(owner, "l.owner_name")
     statuses = ",".join("?" for _ in CONTACTED_STATUSES)
-    converted = "l.is_converted = 1 AND date(l.converted_date) <= ?"
+    converted = "l.is_converted = 1 AND substr(l.converted_date, 1, 10) <= ?"
     r = one(f"""
         WITH {DEALS_AS_OF}
         SELECT
@@ -288,8 +264,8 @@ def _journey_as_of(as_of, owner):
             COUNT(DISTINCT CASE WHEN l.lead_status IN ({statuses}) OR ({converted})
                                 THEN l.id END) contacted,
             COUNT(DISTINCT CASE WHEN {converted} THEN l.id END) converted,
-            -- IN, not EXISTS: SQLite builds the IN list once; a correlated
-            -- EXISTS re-ran the whole asof CTE per lead (~6s).
+            -- IN, not EXISTS: the IN list is built once; a correlated
+            -- EXISTS re-ran the whole asof CTE per lead (~6s on SQLite).
             COUNT(DISTINCT CASE WHEN {converted} AND l.converted_contact_id IN (
                 SELECT contact_id FROM asof
             ) THEN l.id END) action,
@@ -297,7 +273,7 @@ def _journey_as_of(as_of, owner):
                 SELECT contact_id FROM asof WHERE is_won = 1
             ) THEN l.id END) won
         FROM v_leads l
-        WHERE date(l.created_time) <= ?{w}
+        WHERE substr(l.created_time, 1, 10) <= ?{w}
     """, [as_of] + list(CONTACTED_STATUSES) + [as_of] * 4 + [as_of] + p)
     return _journey_steps(r, "all")
 
@@ -327,20 +303,22 @@ def movement(week=None, owner=None):
     w, p = owner_clause(owner, "d.owner_name")
     return rows(f"""
         WITH ordered AS (
-            SELECT h.deal_id, h.deal_name, h.stage_raw, h.changed_at, h.amount_inr,
-                   LAG(h.stage_raw) OVER (PARTITION BY h.deal_id ORDER BY h.changed_at) prev_stage
+            SELECT h.id, h.deal_id, h.deal_name, h.stage_raw, h.changed_at, h.changed_at_exact,
+                   h.amount_inr,
+                   LAG(h.stage_raw) OVER (PARTITION BY h.deal_id
+                                          ORDER BY h.changed_at_exact, h.id) prev_stage
             FROM v_deal_history h
         )
         SELECT o.deal_id, o.deal_name,
                o.prev_stage AS from_stage,
                o.stage_raw  AS to_stage,
-               date(o.changed_at) changed_on,
+               substr(o.changed_at, 1, 10) changed_on,
                o.amount_inr,
                d.owner_name, d.pipeline, d.stage AS current_stage
         FROM ordered o
         LEFT JOIN v_deals d ON d.id = o.deal_id
-        WHERE date(o.changed_at) BETWEEN ? AND ?{w}
-        ORDER BY o.changed_at DESC
+        WHERE substr(o.changed_at, 1, 10) BETWEEN ? AND ?{w}
+        ORDER BY o.changed_at_exact DESC, o.id DESC
     """, [start, end] + p)
 
 
@@ -371,10 +349,13 @@ def movement_summary(week=None, owner=None):
 # --- Targets ----------------------------------------------------------------
 
 def load_targets():
-    if not os.path.exists(TARGETS_PATH):
-        return {}
-    with open(TARGETS_PATH) as handle:
-        return json.load(handle)
+    """The revenue_targets table in the shape targets.json had:
+    {"company_monthly_inr": {month|"_default": inr}, "owner_monthly_inr":
+    {owner|"_default": inr}}, or {} when no targets are set."""
+    cfg = {}
+    for r in rows("SELECT scope, key, target_inr FROM revenue_targets"):
+        cfg.setdefault(f"{r['scope']}_monthly_inr", {})[r["key"]] = r["target_inr"]
+    return cfg
 
 
 def target(month=None, owner=None):
@@ -395,7 +376,7 @@ def target(month=None, owner=None):
         value = table.get(month, table.get("_default", 0))
 
     w, p = owner_clause(owner)
-    # closing_month_effective, not strftime(closing_date) - see
+    # closing_month_effective, not the month of closing_date - see
     # transform.py's closing_date_is_estimated: 93 won deals have no real
     # Closing_Date and would otherwise never count toward any month's target.
     actual = one(f"""SELECT COALESCE(SUM(amount_inr),0) v, COUNT(*) n FROM v_deals
@@ -425,24 +406,24 @@ def stuck_deals(owner=None, days=STUCK_AFTER_DAYS, week=None):
             WITH {DEALS_AS_OF}
             SELECT d.id, d.deal_name, d.stage, d.pipeline, d.owner_name,
                    d.amount_inr, d.closing_date, d.last_change,
-                   CAST(julianday(?) - julianday(d.last_change) AS INTEGER) days_stuck
+                   (?::date - substr(d.last_change, 1, 10)::date) days_stuck
             FROM asof d
             WHERE d.is_open = 1{w}
-              AND julianday(?) - julianday(d.last_change) >= ?
-            ORDER BY days_stuck DESC
+              AND (?::date - substr(d.last_change, 1, 10)::date) >= ?
+            ORDER BY days_stuck DESC, d.id
             LIMIT 50
         """, [as_of, as_of] + p + [as_of, days])
     return rows(f"""
         SELECT d.id, d.deal_name, d.stage, d.pipeline, d.owner_name,
-               d.amount_inr, d.closing_date,
-               MAX(h.changed_at) last_change,
-               CAST(julianday('now') - julianday(MAX(h.changed_at)) AS INTEGER) days_stuck
+               d.amount_inr, d.closing_date, h.last_change,
+               (current_date - substr(h.last_change, 1, 10)::date) days_stuck
         FROM v_deals d
-        LEFT JOIN v_deal_history h ON h.deal_id = d.id
+        LEFT JOIN (SELECT deal_id, MAX(changed_at) last_change
+                   FROM v_deal_history GROUP BY deal_id) h ON h.deal_id = d.id
         WHERE d.is_open = 1{w}
-        GROUP BY d.id
-        HAVING last_change IS NULL OR days_stuck >= ?
-        ORDER BY days_stuck DESC NULLS LAST
+          AND (h.last_change IS NULL
+               OR current_date - substr(h.last_change, 1, 10)::date >= ?)
+        ORDER BY days_stuck DESC NULLS LAST, d.id
         LIMIT 50
     """, p + [days])
 
@@ -454,19 +435,20 @@ def slipped_deals(week=None, owner=None):
     return rows(f"""
         WITH ordered AS (
             SELECT h.deal_id, h.closing_date, h.changed_at,
-                   LAG(h.closing_date) OVER (PARTITION BY h.deal_id ORDER BY h.changed_at) prev_close
+                   LAG(h.closing_date) OVER (PARTITION BY h.deal_id
+                                             ORDER BY h.changed_at_exact, h.id) prev_close
             FROM v_deal_history h
         )
         SELECT o.deal_id, d.deal_name, d.owner_name, d.stage, d.amount_inr,
                o.prev_close AS was, o.closing_date AS now,
-               CAST(julianday(o.closing_date) - julianday(o.prev_close) AS INTEGER) slipped_days,
-               date(o.changed_at) changed_on
+               (o.closing_date::date - o.prev_close::date) slipped_days,
+               substr(o.changed_at, 1, 10) changed_on
         FROM ordered o
         JOIN v_deals d ON d.id = o.deal_id
         WHERE o.prev_close IS NOT NULL
           AND o.closing_date > o.prev_close
-          AND date(o.changed_at) BETWEEN ? AND ?{w}
-        ORDER BY slipped_days DESC
+          AND substr(o.changed_at, 1, 10) BETWEEN ? AND ?{w}
+        ORDER BY slipped_days DESC, o.deal_id
     """, [start, end] + p)
 
 
@@ -480,21 +462,21 @@ def closing_soon(owner=None, days=CLOSING_SOON_DAYS, week=None):
             WITH {DEALS_AS_OF}
             SELECT id, deal_name, stage, pipeline, owner_name, amount_inr,
                    probability, closing_date,
-                   CAST(julianday(closing_date) - julianday(?) AS INTEGER) days_to_close
+                   (closing_date::date - ?::date) days_to_close
             FROM asof
             WHERE is_open = 1 AND closing_date IS NOT NULL
-              AND closing_date BETWEEN ? AND date(?, ?){w}
+              AND closing_date BETWEEN ? AND (?::date + ?::int)::text{w}
             ORDER BY closing_date
-        """, [as_of, as_of, as_of, as_of, f"+{days} days"] + p)
+        """, [as_of, as_of, as_of, as_of, days] + p)
     return rows(f"""
         SELECT id, deal_name, stage, pipeline, owner_name, amount_inr,
                probability, closing_date,
-               CAST(julianday(closing_date) - julianday('now') AS INTEGER) days_to_close
+               (closing_date::date - current_date) days_to_close
         FROM v_deals
         WHERE is_open = 1 AND closing_date IS NOT NULL
-          AND closing_date BETWEEN date('now') AND date('now', ?){w}
+          AND closing_date BETWEEN current_date::text AND (current_date + ?::int)::text{w}
         ORDER BY closing_date
-    """, [f"+{days} days"] + p)
+    """, [days] + p)
 
 
 def owners():
@@ -519,9 +501,9 @@ def weeks_available(limit=26, anchor=None):
 # dashboard - two different "yearly" cuts on one page would be confusing.
 REP_TIMESERIES_BUCKETS = {
     "daily": "closing_date_effective",
-    "weekly": "date(closing_date_effective, '-' || ((CAST(strftime('%w', closing_date_effective) AS INTEGER) + 6) % 7) || ' days')",
+    "weekly": "to_char(date_trunc('week', closing_date_effective::date), 'YYYY-MM-DD')",
     "monthly": "closing_month_effective",
-    "quarterly": "strftime('%Y', closing_date_effective) || '-Q' || ((CAST(strftime('%m', closing_date_effective) AS INTEGER) - 1) / 3 + 1)",
+    "quarterly": "substr(closing_date_effective, 1, 4) || '-Q' || ((CAST(substr(closing_date_effective, 6, 2) AS INTEGER) - 1) / 3 + 1)",
     "yearly": "fiscal_year_effective",
 }
 

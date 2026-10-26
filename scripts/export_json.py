@@ -10,11 +10,12 @@ Usage: python3 scripts/export_json.py
 
 import json
 import os
-import sqlite3
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
 OUT_DIR = os.path.join(ROOT, "dashboard", "data")
 
 # Aggregates worth precomputing, so a dashboard doesn't ship 8,844 leads to
@@ -30,20 +31,20 @@ AGGREGATES = {
     "pipelines": """
         SELECT pipeline, COUNT(*) AS deals, SUM(is_won) AS won,
                SUM(is_open) AS open_deals,
-               ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) AS won_inr,
-               ROUND(SUM(CASE WHEN is_open THEN amount_inr END), 2) AS open_inr
+               ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END), 2) AS won_inr,
+               ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END), 2) AS open_inr
         FROM v_deals WHERE pipeline IS NOT NULL
-        GROUP BY pipeline ORDER BY won_inr DESC""",
+        GROUP BY pipeline ORDER BY won_inr DESC NULLS LAST""",
     "seasonality": """
-        SELECT CAST(strftime('%m', closing_date_effective) AS INTEGER) AS month,
+        SELECT CAST(substr(closing_date_effective, 6, 2) AS INTEGER) AS month,
                COUNT(*) AS deals_won, ROUND(SUM(amount_inr), 2) AS revenue_inr
         FROM v_deals WHERE is_won = 1
         GROUP BY month ORDER BY month""",
     "reps": """
         SELECT owner_name, fiscal_year_effective AS fiscal_year, SUM(is_won) AS deals_won,
-               ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) AS revenue_inr
+               ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END), 2) AS revenue_inr
         FROM v_deals WHERE owner_name IS NOT NULL AND fiscal_year_effective IS NOT NULL
-        GROUP BY owner_name, fiscal_year_effective ORDER BY fiscal_year_effective, revenue_inr DESC""",
+        GROUP BY owner_name, fiscal_year_effective ORDER BY fiscal_year_effective, revenue_inr DESC NULLS LAST""",
     "pipeline_history": """
         SELECT snapshot_date, COUNT(*) AS open_deals,
                ROUND(SUM(amount_inr), 2) AS value_inr
@@ -55,10 +56,7 @@ FULL_VIEWS = ["v_deals", "v_deal_history", "v_open_pipeline", "v_users"]
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    conn = db.connect(read_only=True)
     os.makedirs(OUT_DIR, exist_ok=True)
 
     def write(name, rows):
@@ -69,14 +67,13 @@ def main():
         print(f"  {name + '.json':<26} {len(rows):>7} rows  {size:>8.1f} KB")
 
     for name, sql in AGGREGATES.items():
-        write(name, [dict(r) for r in conn.execute(sql)])
+        write(name, conn.execute(sql).fetchall())
     for view in FULL_VIEWS:
-        write(view, [dict(r) for r in conn.execute(f"SELECT * FROM {view}")])
+        write(view, conn.execute(f"SELECT * FROM {view}").fetchall())
 
     counts = {
-        r["name"]: conn.execute(f"SELECT COUNT(*) FROM {r['name']}").fetchone()[0]
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name")
+        name: conn.execute(f"SELECT COUNT(*) AS n FROM {name}").fetchone()["n"]
+        for name in db.view_names(conn)
     }
     write("meta", {
         "currency": "INR",

@@ -46,7 +46,7 @@ def account_contacts(account_name, limit=10, owner=None):
     # account genuinely exists under a near-identical name.
     partial = rows("""
         SELECT DISTINCT account_name
-        FROM v_contacts WHERE account_name LIKE '%' || ? || '%'
+        FROM v_contacts WHERE account_name ILIKE '%' || ? || '%'
         LIMIT 5
     """, (account_name,))
 

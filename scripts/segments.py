@@ -123,8 +123,8 @@ def _lead_segment(column, value):
 def _pipeline_segment(value):
     seg = one("""
         SELECT COUNT(*) deals, SUM(is_won) won, SUM(is_lost) lost, SUM(is_open) open_deals,
-               ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) won_inr,
-               ROUND(SUM(CASE WHEN is_open THEN amount_inr END), 2) open_inr
+               ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END), 2) won_inr,
+               ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END), 2) open_inr
         FROM v_deals WHERE pipeline = ?
     """, (value,))
     if not seg or not seg["deals"]:

@@ -15,23 +15,47 @@ They handle the four traps this CRM contains:
   5. Zoho's datetime fields (Created_Time, Modified_Time, Last_Activity_Time,
      Converted_Date_Time, Call_Start_Time, Start_DateTime - anything that
      isn't a plain date like Closing_Date/Due_Date) come back as ISO-8601
-     with a +05:30 offset, e.g. "2026-10-19T02:00:00+05:30". SQLite's own
-     date()/datetime()/strftime() silently convert an offset-bearing string
-     to UTC, which shifts anything from 00:00-05:30 IST onto the previous
-     day (or week). The offset here is always +05:30, so IST_DATE/
-     IST_DATETIME/IST_MONTH below read the wall-clock digits directly
-     instead of letting SQLite "helpfully" convert them.
+     with a +05:30 offset, e.g. "2026-10-19T02:00:00+05:30". Converting
+     those to a timestamp would shift anything from 00:00-05:30 IST onto
+     the previous day (or week) in UTC. The offset here is always +05:30,
+     so IST_DATE/IST_DATETIME/IST_MONTH below read the wall-clock digits
+     directly instead.
+
+Postgres. Zoho's raw JSON is JSONB in records.payload; J()/N() below pull
+a field out as text/number. Dates stay 'YYYY-MM-DD' text and flags
+(is_won, is_open, ...) stay 0/1 integers, as the queries expect.
 
 Views are recreated on every run, so this is safe to re-run any time.
+Also creates any missing tables and seeds revenue targets (see main()).
 Usage: python3 scripts/transform.py
 """
 
+import json
 import os
-import sqlite3
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
+TARGETS_SEED_PATH = os.path.join(ROOT, "config", "targets.json")
+
+
+def J(path, src="payload"):
+    """A JSON field as text: J('Owner.name') -> payload->'Owner'->>'name'."""
+    parts = path.split(".")
+    return "(" + src + "".join(f"->'{x}'" for x in parts[:-1]) + f"->>'{parts[-1]}')"
+
+
+def N(path):
+    """A JSON field as a number (NULL when missing or empty)."""
+    return f"NULLIF({J(path)}, '')::numeric"
+
+
+def flag(condition):
+    """A 0/1 integer column - CASE so a NULL input reads as 0."""
+    return f"CASE WHEN {condition} THEN 1 ELSE 0 END"
+
 
 # See trap 5 above - use these on any Zoho *datetime* field (not a plain
 # date like Closing_Date/Due_Date, which carry no offset and are fine as-is).
@@ -39,30 +63,33 @@ IST_DATE = "substr({d}, 1, 10)"
 IST_DATETIME = "substr({d}, 1, 16)"
 IST_MONTH = "substr({d}, 1, 7)"
 
-# Apr-Mar fiscal year label, e.g. 2026-04-15 -> FY2026-27
+# Apr-Mar fiscal year label from a 'YYYY-MM-DD' text date, e.g.
+# 2026-04-15 -> FY2026-27
 FISCAL_YEAR = """
-    CASE WHEN CAST(strftime('%m', {d}) AS INTEGER) >= 4
-        THEN 'FY' || strftime('%Y', {d}) || '-' ||
-             substr(CAST(CAST(strftime('%Y', {d}) AS INTEGER) + 1 AS TEXT), 3, 2)
-        ELSE 'FY' || CAST(CAST(strftime('%Y', {d}) AS INTEGER) - 1 AS TEXT) || '-' ||
-             substr(strftime('%Y', {d}), 3, 2)
+    CASE WHEN CAST(substr({d}, 6, 2) AS INTEGER) >= 4
+        THEN 'FY' || substr({d}, 1, 4) || '-' ||
+             substr(CAST(CAST(substr({d}, 1, 4) AS INTEGER) + 1 AS TEXT), 3, 2)
+        ELSE 'FY' || CAST(CAST(substr({d}, 1, 4) AS INTEGER) - 1 AS TEXT) || '-' ||
+             substr({d}, 3, 2)
     END
 """
 
+STAGE = "(payload->>'Stage')"
+
 # Fixes the CRM's own spelling and strips the parenthetical qualifiers.
 STAGE_CLEAN = """
-    CASE json_extract(payload, '$.Stage')
+    CASE (payload->>'Stage')
         WHEN 'Demo (Pipleline)'                            THEN 'Demo'
         WHEN 'Negotation / Contract Finalization (Commit)'  THEN 'Negotiation / Contract Finalization'
         WHEN 'Proposal / Pricing Quote (Qualified)'         THEN 'Proposal / Pricing Quote'
         WHEN 'Need Analysis'                                THEN 'Needs Analysis'
-        ELSE json_extract(payload, '$.Stage')
+        ELSE (payload->>'Stage')
     END
 """
 
 # Funnel ordering. Closed and parked states sort last so charts read correctly.
 STAGE_ORDER = """
-    CASE json_extract(payload, '$.Stage')
+    CASE (payload->>'Stage')
         WHEN 'Prospects'                                    THEN 10
         WHEN 'Need Analysis'                                THEN 20
         WHEN 'Demo (Pipleline)'                             THEN 30
@@ -82,64 +109,64 @@ VIEWS = {}
 VIEWS["v_deals"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Deal_Name')                        AS deal_name,
+    {J('Deal_Name')}                        AS deal_name,
     {STAGE_CLEAN}                                               AS stage,
-    json_extract(payload, '$.Stage')                            AS stage_raw,
+    {J('Stage')}                            AS stage_raw,
     {STAGE_ORDER}                                               AS stage_order,
-    json_extract(payload, '$.Stage') = 'Closed Won'             AS is_won,
-    json_extract(payload, '$.Stage') = 'Closed Lost'            AS is_lost,
+    {flag(STAGE + " = 'Closed Won'")}  AS is_won,
+    {flag(STAGE + " = 'Closed Lost'")} AS is_lost,
     -- Was "Stage NOT IN ('Closed Won', 'Closed Lost')" - matched only those
     -- two exact strings, so any future closed stage with a different exact
     -- name (e.g. "Closed Lost to Competition") would silently count as open.
     -- LIKE 'Closed%' catches any closed-sounding stage, known or not; the
     -- business question of whether OnHold should count as open is separate
     -- and deliberately untouched here - see README/project notes.
-    json_extract(payload, '$.Stage') NOT LIKE 'Closed%'         AS is_open,
-    json_extract(payload, '$.Pipeline')                         AS pipeline,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
-    json_extract(payload, '$.Owner.id')                         AS owner_id,
-    json_extract(payload, '$.Account_Name.name')                AS account_name,
-    json_extract(payload, '$.Account_Name.id')                  AS account_id,
-    json_extract(payload, '$.Contact_Name.name')                AS contact_name,
-    json_extract(payload, '$.Contact_Name.id')                  AS contact_id,
-    json_extract(payload, '$.Currency')                         AS currency,
-    json_extract(payload, '$.Amount')                           AS amount_original,
-    json_extract(payload, '$.Exchange_Rate')                    AS exchange_rate,
+    {flag(STAGE + " NOT LIKE 'Closed%'")} AS is_open,
+    {J('Pipeline')}                         AS pipeline,
+    {J('Owner.name')}                       AS owner_name,
+    {J('Owner.id')}                         AS owner_id,
+    {J('Account_Name.name')}                AS account_name,
+    {J('Account_Name.id')}                  AS account_id,
+    {J('Contact_Name.name')}                AS contact_name,
+    {J('Contact_Name.id')}                  AS contact_id,
+    {J('Currency')}                         AS currency,
+    {N('Amount')}                           AS amount_original,
+    {N('Exchange_Rate')}                    AS exchange_rate,
     -- Divide, not multiply: see module docstring, trap 1.
     CASE
-        WHEN COALESCE(json_extract(payload, '$.Exchange_Rate'), 0) = 0 THEN NULL
-        ELSE json_extract(payload, '$.Amount') / json_extract(payload, '$.Exchange_Rate')
+        WHEN COALESCE({N('Exchange_Rate')}, 0) = 0 THEN NULL
+        ELSE {N('Amount')} / {N('Exchange_Rate')}
     END                                                         AS amount_inr,
-    json_extract(payload, '$.Probability')                      AS probability,
-    date(json_extract(payload, '$.Closing_Date'))               AS closing_date,
-    strftime('%Y-%m', json_extract(payload, '$.Closing_Date'))  AS closing_month,
-    {FISCAL_YEAR.format(d="json_extract(payload, '$.Closing_Date')")} AS fiscal_year,
+    {N('Probability')}                      AS probability,
+    substr({J('Closing_Date')}, 1, 10)               AS closing_date,
+    substr({J('Closing_Date')}, 1, 7)  AS closing_month,
+    {FISCAL_YEAR.format(d=J('Closing_Date'))} AS fiscal_year,
     -- 93 of 1,679 won deals have no Closing_Date, which silently dropped
     -- them from every bookings figure (v_bookings_monthly/_fiscal filtered
     -- on "closing_date IS NOT NULL"). These _effective columns fall back to
     -- the record's own last-modified date - the best available proxy for
     -- "when this was actually won" - and flag which rows are estimated so
     -- a consumer can tell real from inferred.
-    COALESCE(date(json_extract(payload, '$.Closing_Date')), {IST_DATE.format(d="modified_time")}) AS closing_date_effective,
-    COALESCE(strftime('%Y-%m', json_extract(payload, '$.Closing_Date')), {IST_MONTH.format(d="modified_time")}) AS closing_month_effective,
-    {FISCAL_YEAR.format(d="COALESCE(json_extract(payload, '$.Closing_Date'), " + IST_DATE.format(d="modified_time") + ")")} AS fiscal_year_effective,
-    CASE WHEN json_extract(payload, '$.Closing_Date') IS NULL THEN 1 ELSE 0 END AS closing_date_is_estimated,
-    json_extract(payload, '$.Financial_Year')                   AS fiscal_year_field,
-    json_extract(payload, '$.Lead_Source')                      AS lead_source,
-    json_extract(payload, '$.Opportunity_Type')                 AS opportunity_type,
-    json_extract(payload, '$.Trial_Status')                      AS trial_status,
-    date(json_extract(payload, '$.Trial_End_Date'))             AS trial_end_date,
-    date(json_extract(payload, '$.Subscription_Start_Date'))    AS subscription_start_date,
-    date(json_extract(payload, '$.Subscription_End_Date'))      AS subscription_end_date,
-    date(json_extract(payload, '$.Proposal_Sent_Date'))         AS proposal_sent_date,
-    date(json_extract(payload, '$.Expected_Closure_Date'))      AS expected_closure_date,
-    json_extract(payload, '$.Sales_Cycle_Duration')             AS sales_cycle_days,
-    json_extract(payload, '$.Overall_Sales_Duration')           AS overall_sales_days,
-    json_extract(payload, '$.Hold_Reason')                      AS hold_reason,
+    COALESCE(substr({J('Closing_Date')}, 1, 10), {IST_DATE.format(d="modified_time")}) AS closing_date_effective,
+    COALESCE(substr({J('Closing_Date')}, 1, 7), {IST_MONTH.format(d="modified_time")}) AS closing_month_effective,
+    {FISCAL_YEAR.format(d="COALESCE(" + J('Closing_Date') + ", " + IST_DATE.format(d="modified_time") + ")")} AS fiscal_year_effective,
+    {flag(J('Closing_Date') + " IS NULL")} AS closing_date_is_estimated,
+    {J('Financial_Year')}                   AS fiscal_year_field,
+    {J('Lead_Source')}                      AS lead_source,
+    {J('Opportunity_Type')}                 AS opportunity_type,
+    {J('Trial_Status')}                      AS trial_status,
+    substr({J('Trial_End_Date')}, 1, 10)             AS trial_end_date,
+    substr({J('Subscription_Start_Date')}, 1, 10)    AS subscription_start_date,
+    substr({J('Subscription_End_Date')}, 1, 10)      AS subscription_end_date,
+    substr({J('Proposal_Sent_Date')}, 1, 10)         AS proposal_sent_date,
+    substr({J('Expected_Closure_Date')}, 1, 10)      AS expected_closure_date,
+    {N('Sales_Cycle_Duration')}             AS sales_cycle_days,
+    {N('Overall_Sales_Duration')}           AS overall_sales_days,
+    {J('Hold_Reason')}                      AS hold_reason,
     -- Lost_Reason holds billing frequency in this CRM, not loss causes.
-    json_extract(payload, '$.Lost_Reason')                      AS lost_reason_misused,
-    json_extract(payload, '$.Next_Step')                        AS next_step,
-    {IST_DATETIME.format(d="json_extract(payload, '$.Last_Activity_Time')")} AS last_activity_time,
+    {J('Lost_Reason')}                      AS lost_reason_misused,
+    {J('Next_Step')}                        AS next_step,
+    {IST_DATETIME.format(d=J('Last_Activity_Time'))} AS last_activity_time,
     modified_time,
     extracted_at
 FROM records
@@ -149,22 +176,25 @@ WHERE module = 'Deals' AND is_deleted = 0
 VIEWS["v_deal_history"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Potential_Name.id')                AS deal_id,
-    json_extract(payload, '$.Potential_Name.name')              AS deal_name,
-    json_extract(payload, '$.Stage')                            AS stage_raw,
-    json_extract(payload, '$.Stage_Duration_Calendar_Days')     AS stage_duration_days,
-    json_extract(payload, '$.Amount')                           AS amount_original,
-    json_extract(payload, '$.Exchange_Rate')                    AS exchange_rate,
+    {J('Potential_Name.id')}                AS deal_id,
+    {J('Potential_Name.name')}              AS deal_name,
+    {J('Stage')}                            AS stage_raw,
+    {N('Stage_Duration_Calendar_Days')}     AS stage_duration_days,
+    {N('Amount')}                           AS amount_original,
+    {N('Exchange_Rate')}                    AS exchange_rate,
     CASE
-        WHEN COALESCE(json_extract(payload, '$.Exchange_Rate'), 0) = 0 THEN NULL
-        ELSE json_extract(payload, '$.Amount') / json_extract(payload, '$.Exchange_Rate')
+        WHEN COALESCE({N('Exchange_Rate')}, 0) = 0 THEN NULL
+        ELSE {N('Amount')} / {N('Exchange_Rate')}
     END                                                         AS amount_inr,
-    json_extract(payload, '$.Probability')                      AS probability,
-    date(json_extract(payload, '$.Closing_Date'))               AS closing_date,
-    json_extract(payload, '$.Moved_To__s')                      AS moved_to,
-    json_extract(payload, '$.Modified_By.name')                 AS changed_by,
-    {IST_DATETIME.format(d="json_extract(payload, '$.Modified_Time')")} AS changed_at,
-    {FISCAL_YEAR.format(d=IST_DATE.format(d="json_extract(payload, '$.Modified_Time')"))} AS fiscal_year
+    {N('Probability')}                      AS probability,
+    substr({J('Closing_Date')}, 1, 10)               AS closing_date,
+    {J('Moved_To__s')}                      AS moved_to,
+    {J('Modified_By.name')}                 AS changed_by,
+    {IST_DATETIME.format(d=J('Modified_Time'))} AS changed_at,
+    -- To the second (changed_at is to the minute, and a deal can change
+    -- twice in one minute). Always +05:30, so text order is time order.
+    {J('Modified_Time')}                    AS changed_at_exact,
+    {FISCAL_YEAR.format(d=IST_DATE.format(d=J('Modified_Time')))} AS fiscal_year
 FROM records
 WHERE module = 'DealHistory' AND is_deleted = 0
 """
@@ -172,24 +202,24 @@ WHERE module = 'DealHistory' AND is_deleted = 0
 VIEWS["v_leads"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Full_Name')                        AS full_name,
-    json_extract(payload, '$.Company')                          AS company,
-    json_extract(payload, '$.Email')                            AS email,
-    json_extract(payload, '$.Lead_Status')                      AS lead_status,
-    json_extract(payload, '$.Lead_Source')                      AS lead_source,
-    json_extract(payload, '$.Industry')                         AS industry,
-    json_extract(payload, '$.City')                             AS city,
-    json_extract(payload, '$.Country')                          AS country,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
-    json_extract(payload, '$.Owner.id')                         AS owner_id,
-    COALESCE(json_extract(payload, '$.Converted__s'), 0)        AS is_converted,
-    {IST_DATE.format(d="json_extract(payload, '$.Converted_Date_Time')")} AS converted_date,
-    json_extract(payload, '$.Converted_Deal.id')                AS converted_deal_id,
-    json_extract(payload, '$.Converted_Account.id')             AS converted_account_id,
-    json_extract(payload, '$.Converted_Contact.id')             AS converted_contact_id,
+    {J('Full_Name')}                        AS full_name,
+    {J('Company')}                          AS company,
+    {J('Email')}                            AS email,
+    {J('Lead_Status')}                      AS lead_status,
+    {J('Lead_Source')}                      AS lead_source,
+    {J('Industry')}                         AS industry,
+    {J('City')}                             AS city,
+    {J('Country')}                          AS country,
+    {J('Owner.name')}                       AS owner_name,
+    {J('Owner.id')}                         AS owner_id,
+    {flag(J('Converted__s') + " = 'true'")} AS is_converted,
+    {IST_DATE.format(d=J('Converted_Date_Time'))} AS converted_date,
+    {J('Converted_Deal.id')}                AS converted_deal_id,
+    {J('Converted_Account.id')}             AS converted_account_id,
+    {J('Converted_Contact.id')}             AS converted_contact_id,
     -- Unlike Deals, Leads do carry a real Created_Time.
-    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
-    {IST_MONTH.format(d="json_extract(payload, '$.Created_Time')")} AS created_month,
+    {IST_DATETIME.format(d=J('Created_Time'))} AS created_time,
+    {IST_MONTH.format(d=J('Created_Time'))} AS created_month,
     modified_time,
     extracted_at
 FROM records
@@ -199,15 +229,15 @@ WHERE module = 'Leads' AND is_deleted = 0
 VIEWS["v_accounts"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Account_Name')                     AS account_name,
-    json_extract(payload, '$.Industry')                         AS industry,
-    json_extract(payload, '$.Account_Type')                     AS account_type,
-    json_extract(payload, '$.Billing_City')                     AS billing_city,
-    json_extract(payload, '$.Billing_Country')                  AS billing_country,
-    json_extract(payload, '$.Website')                          AS website,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
-    json_extract(payload, '$.Owner.id')                         AS owner_id,
-    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
+    {J('Account_Name')}                     AS account_name,
+    {J('Industry')}                         AS industry,
+    {J('Account_Type')}                     AS account_type,
+    {J('Billing_City')}                     AS billing_city,
+    {J('Billing_Country')}                  AS billing_country,
+    {J('Website')}                          AS website,
+    {J('Owner.name')}                       AS owner_name,
+    {J('Owner.id')}                         AS owner_id,
+    {IST_DATETIME.format(d=J('Created_Time'))} AS created_time,
     modified_time,
     extracted_at
 FROM records
@@ -217,15 +247,15 @@ WHERE module = 'Accounts' AND is_deleted = 0
 VIEWS["v_contacts"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Full_Name')                        AS full_name,
-    json_extract(payload, '$.Email')                            AS email,
-    json_extract(payload, '$.Title')                            AS title,
-    json_extract(payload, '$.Department')                       AS department,
-    json_extract(payload, '$.Account_Name.name')                AS account_name,
-    json_extract(payload, '$.Account_Name.id')                  AS account_id,
-    json_extract(payload, '$.Lead_Source')                      AS lead_source,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
-    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
+    {J('Full_Name')}                        AS full_name,
+    {J('Email')}                            AS email,
+    {J('Title')}                            AS title,
+    {J('Department')}                       AS department,
+    {J('Account_Name.name')}                AS account_name,
+    {J('Account_Name.id')}                  AS account_id,
+    {J('Lead_Source')}                      AS lead_source,
+    {J('Owner.name')}                       AS owner_name,
+    {IST_DATETIME.format(d=J('Created_Time'))} AS created_time,
     modified_time,
     extracted_at
 FROM records
@@ -237,61 +267,61 @@ SELECT
     module                                                      AS activity_type,
     id,
     COALESCE(
-        json_extract(payload, '$.Subject'),
-        json_extract(payload, '$.Event_Title')
+        {J('Subject')},
+        {J('Event_Title')}
     )                                                           AS subject,
-    json_extract(payload, '$.Status')                           AS status,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
-    json_extract(payload, '$.Who_Id.name')                      AS related_contact,
-    json_extract(payload, '$.What_Id.name')                      AS related_record,
+    {J('Status')}                           AS status,
+    {J('Owner.name')}                       AS owner_name,
+    {J('Who_Id.name')}                      AS related_contact,
+    {J('What_Id.name')}                      AS related_record,
     COALESCE(
-        date(json_extract(payload, '$.Due_Date')),
-        {IST_DATE.format(d="json_extract(payload, '$.Call_Start_Time')")},
-        {IST_DATE.format(d="json_extract(payload, '$.Start_DateTime')")}
+        substr({J('Due_Date')}, 1, 10),
+        {IST_DATE.format(d=J('Call_Start_Time'))},
+        {IST_DATE.format(d=J('Start_DateTime'))}
     )                                                           AS activity_date,
-    json_extract(payload, '$.Call_Duration')                    AS call_duration,
-    {IST_DATETIME.format(d="json_extract(payload, '$.Created_Time')")} AS created_time,
+    {J('Call_Duration')}                    AS call_duration,
+    {IST_DATETIME.format(d=J('Created_Time'))} AS created_time,
     modified_time
 FROM records
 WHERE module IN ('Tasks', 'Calls', 'Events') AND is_deleted = 0
 """
 
-VIEWS["v_campaigns"] = """
+VIEWS["v_campaigns"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Campaign_Name')                    AS campaign_name,
-    json_extract(payload, '$.Type')                             AS campaign_type,
-    json_extract(payload, '$.Status')                           AS status,
-    json_extract(payload, '$.Expected_Revenue')                 AS expected_revenue,
-    json_extract(payload, '$.Budgeted_Cost')                    AS budgeted_cost,
-    json_extract(payload, '$.Actual_Cost')                      AS actual_cost,
-    date(json_extract(payload, '$.Start_Date'))                 AS start_date,
-    date(json_extract(payload, '$.End_Date'))                   AS end_date,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
+    {J('Campaign_Name')}                    AS campaign_name,
+    {J('Type')}                             AS campaign_type,
+    {J('Status')}                           AS status,
+    {N('Expected_Revenue')}                 AS expected_revenue,
+    {N('Budgeted_Cost')}                    AS budgeted_cost,
+    {N('Actual_Cost')}                      AS actual_cost,
+    substr({J('Start_Date')}, 1, 10)                 AS start_date,
+    substr({J('End_Date')}, 1, 10)                   AS end_date,
+    {J('Owner.name')}                       AS owner_name,
     modified_time
 FROM records
 WHERE module = 'Campaigns' AND is_deleted = 0
 """
 
-VIEWS["v_marketing_expense"] = """
+VIEWS["v_marketing_expense"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.Name')                             AS name,
-    json_extract(payload, '$.Owner.name')                       AS owner_name,
+    {J('Name')}                             AS name,
+    {J('Owner.name')}                       AS owner_name,
     payload                                                     AS raw_payload,
     modified_time
 FROM records
 WHERE module = 'Marketing_Expense' AND is_deleted = 0
 """
 
-VIEWS["v_users"] = """
+VIEWS["v_users"] = f"""
 SELECT
     id,
-    json_extract(payload, '$.full_name')                        AS full_name,
-    json_extract(payload, '$.email')                            AS email,
-    json_extract(payload, '$.role.name')                        AS role,
-    json_extract(payload, '$.profile.name')                     AS profile,
-    json_extract(payload, '$.status')                           AS status
+    {J('full_name')}                        AS full_name,
+    {J('email')}                            AS email,
+    {J('role.name')}                        AS role,
+    {J('profile.name')}                     AS profile,
+    {J('status')}                           AS status
 FROM users
 """
 
@@ -349,66 +379,56 @@ FROM pipeline_snapshots s
 """
 
 
+def seed_targets(conn):
+    """Copies config/targets.json into revenue_targets, but only while the
+    table is empty - after that the table is the source of truth and is
+    edited directly, so a redeploy never overwrites a changed target."""
+    if conn.execute("SELECT 1 FROM revenue_targets LIMIT 1").fetchone():
+        return 0
+    if not os.path.exists(TARGETS_SEED_PATH):
+        return 0
+    with open(TARGETS_SEED_PATH, encoding="utf-8") as handle:
+        cfg = json.load(handle)
+    seed = [("company", k, v) for k, v in cfg.get("company_monthly_inr", {}).items()]
+    seed += [("owner", k, v) for k, v in cfg.get("owner_monthly_inr", {}).items()]
+    db.executemany(conn, "INSERT INTO revenue_targets (scope, key, target_inr) VALUES (?, ?, ?)", seed)
+    return len(seed)
+
+
 def main():
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = db.connect()
+    db.ensure_schema(conn)
+    seeded = seed_targets(conn)
+    if seeded:
+        print(f"  revenue_targets seeded with {seeded} rows from config/targets.json")
 
-    # Snapshot table must exist before the view that reads it.
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS pipeline_snapshots (
-            snapshot_date TEXT NOT NULL,
-            deal_id       TEXT NOT NULL,
-            deal_name     TEXT,
-            stage         TEXT,
-            pipeline      TEXT,
-            amount_inr    REAL,
-            probability   INTEGER,
-            closing_date  TEXT,
-            owner_name    TEXT,
-            PRIMARY KEY (snapshot_date, deal_id)
-        );
-
-        -- Daily fill-rate history for the data-quality asks sent to the
-        -- sales team (see scripts/data_quality.py) - tracks whether those
-        -- fixes are actually happening, rather than re-checking by eye.
-        CREATE TABLE IF NOT EXISTS data_quality_snapshots (
-            snapshot_date TEXT NOT NULL,
-            metric_key    TEXT NOT NULL,
-            numerator     INTEGER,
-            denominator   INTEGER,
-            pct           REAL,
-            PRIMARY KEY (snapshot_date, metric_key)
-        );
-    """)
-
+    # Dropped together and rebuilt in order: Postgres won't replace a view
+    # whose columns changed, and the aggregates depend on v_deals.
+    for name in reversed(list(VIEWS)):
+        conn.execute(f"DROP VIEW IF EXISTS {name} CASCADE")
     for name, body in VIEWS.items():
-        conn.execute(f"DROP VIEW IF EXISTS {name}")
         conn.execute(f"CREATE VIEW {name} AS {body}")
-        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+        count = conn.execute(f"SELECT COUNT(*) AS n FROM {name}").fetchone()["n"]
         print(f"  {name:<24} {count:>7} rows")
 
-    # SQLite can't index a view, but it can index the same json_extract
-    # expression on the underlying table, and its planner matches that
-    # against a view's WHERE/join clauses. Without this, joining v_leads to
-    # v_deals on the converted contact (weekly.journey) took ~35s instead of
-    # milliseconds - every lead's converted contact was compared against
-    # every deal with nothing to narrow the search.
-    conn.executescript("""
-        DROP INDEX IF EXISTS idx_deals_contact_id;
-        CREATE INDEX idx_deals_contact_id
-            ON records(json_extract(payload, '$.Contact_Name.id'))
+    # Expression indexes the planner matches against the views' join keys -
+    # weekly.journey joins leads to deals on the converted contact.
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_deals_contact_id
+            ON records ((payload->'Contact_Name'->>'id'))
             WHERE module = 'Deals' AND is_deleted = 0;
-
-        DROP INDEX IF EXISTS idx_leads_converted_contact_id;
-        CREATE INDEX idx_leads_converted_contact_id
-            ON records(json_extract(payload, '$.Converted_Contact.id'))
+        CREATE INDEX IF NOT EXISTS idx_leads_converted_contact_id
+            ON records ((payload->'Converted_Contact'->>'id'))
             WHERE module = 'Leads' AND is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_history_deal_id
+            ON records ((payload->'Potential_Name'->>'id'))
+            WHERE module = 'DealHistory' AND is_deleted = 0;
     """)
+    conn.execute("ANALYZE records")
 
     conn.commit()
     conn.close()
-    print(f"\n{len(VIEWS)} views built in {DB_PATH}")
+    print(f"\n{len(VIEWS)} views built")
 
 
 if __name__ == "__main__":

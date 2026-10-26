@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pull Zoho CRM modules into a local SQLite database.
+"""Pull Zoho CRM modules into the Postgres database (DATABASE_URL).
 
 Design notes:
   - Records land as raw JSON. Metrics are defined later in SQL views, so a
@@ -9,7 +9,7 @@ Design notes:
   - Deletes are polled separately, because a delta sync never reports them and
     stale rows would quietly inflate every count.
 
-Stdlib only. Usage:
+Usage:
     python3 scripts/extract.py            # incremental (full on first run)
     python3 scripts/extract.py --full     # ignore saved state, re-pull all
     python3 scripts/extract.py Deals      # one module only
@@ -17,16 +17,13 @@ Stdlib only. Usage:
 
 import json
 import os
-import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
 import zoho
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
 
 # Modules worth pulling, given what this org actually populates.
 MODULES = [
@@ -49,34 +46,9 @@ FIELD_LIMIT = 50  # Zoho caps the `fields` param
 
 
 def connect():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS records (
-            module        TEXT NOT NULL,
-            id            TEXT NOT NULL,
-            payload       TEXT NOT NULL,
-            modified_time TEXT,
-            extracted_at  TEXT NOT NULL,
-            is_deleted    INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (module, id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_records_module_modified
-            ON records (module, modified_time);
-
-        CREATE TABLE IF NOT EXISTS sync_state (
-            module          TEXT PRIMARY KEY,
-            last_run_at     TEXT,
-            watermark       TEXT,
-            records_seen    INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS users (
-            id           TEXT PRIMARY KEY,
-            payload      TEXT NOT NULL,
-            extracted_at TEXT NOT NULL
-        );
-    """)
+    conn = db.connect()
+    db.ensure_schema(conn)
+    conn.commit()
     return conn
 
 
@@ -136,9 +108,10 @@ def fetch_pages(module, modified_since=None):
 
 def upsert(conn, module, rows):
     stamp = now_iso()
-    conn.executemany(
+    db.executemany(
+        conn,
         """INSERT INTO records (module, id, payload, modified_time, extracted_at, is_deleted)
-           VALUES (?, ?, ?, ?, ?, 0)
+           VALUES (?, ?, ?::jsonb, ?, ?, 0)
            ON CONFLICT(module, id) DO UPDATE SET
                payload       = excluded.payload,
                modified_time = excluded.modified_time,
@@ -172,11 +145,11 @@ def mark_deleted(conn, module):
             return flagged
 
         ids = [row["id"] for row in result["data"]]
-        cursor = conn.executemany(
-            "UPDATE records SET is_deleted = 1 WHERE module = ? AND id = ?",
+        flagged += db.executemany(
+            conn,
+            "UPDATE records SET is_deleted = 1 WHERE module = ? AND id = ? AND is_deleted = 0",
             [(module, record_id) for record_id in ids],
-        )
-        flagged += cursor.rowcount or 0
+        ) or 0
 
         info = result.get("info", {})
         if not info.get("more_records"):
@@ -190,8 +163,9 @@ def sync_users(conn):
     result = zoho.api_get("/crm/v8/users", {"type": "AllUsers", "per_page": 200})
     rows = result.get("users", [])
     stamp = now_iso()
-    conn.executemany(
-        """INSERT INTO users (id, payload, extracted_at) VALUES (?, ?, ?)
+    db.executemany(
+        conn,
+        """INSERT INTO users (id, payload, extracted_at) VALUES (?, ?::jsonb, ?)
            ON CONFLICT(id) DO UPDATE SET
                payload = excluded.payload, extracted_at = excluded.extracted_at""",
         [(u["id"], json.dumps(u, separators=(",", ":")), stamp) for u in rows],
@@ -203,10 +177,10 @@ def sync_users(conn):
 def sync_module(conn, module, full=False):
     watermark = None
     if not full:
-        row = conn.execute(
-            "SELECT watermark FROM sync_state WHERE module = ?", (module,)
+        row = db.execute(
+            conn, "SELECT watermark FROM sync_state WHERE module = ?", (module,)
         ).fetchone()
-        watermark = row[0] if row else None
+        watermark = row["watermark"] if row else None
 
     mode = "full" if not watermark else f"delta since {watermark[:16]}"
     print(f"{module:<16} {mode}")
@@ -223,7 +197,8 @@ def sync_module(conn, module, full=False):
 
     deleted = mark_deleted(conn, module)
 
-    conn.execute(
+    db.execute(
+        conn,
         """INSERT INTO sync_state (module, last_run_at, watermark, records_seen)
            VALUES (?, ?, ?, ?)
            ON CONFLICT(module) DO UPDATE SET
@@ -234,9 +209,9 @@ def sync_module(conn, module, full=False):
     )
     conn.commit()
 
-    held = conn.execute(
-        "SELECT COUNT(*) FROM records WHERE module = ? AND is_deleted = 0", (module,)
-    ).fetchone()[0]
+    held = db.execute(
+        conn, "SELECT COUNT(*) AS n FROM records WHERE module = ? AND is_deleted = 0", (module,)
+    ).fetchone()["n"]
     note = f", {deleted} newly flagged deleted" if deleted else ""
     print(f"    done: {total} fetched, {held} held locally{note}\n")
 
@@ -257,7 +232,6 @@ def main():
     for module in targets:
         sync_module(conn, module, full=full)
 
-    print(f"Database: {DB_PATH}")
     print(f"Elapsed:  {time.time() - started:.1f}s")
     conn.close()
 

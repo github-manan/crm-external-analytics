@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Dump every view to CSV for tools that can't read SQLite directly.
+"""Dump every view to CSV.
 
-Power BI, Excel and Google Sheets all take CSV; Metabase, Tableau and DuckDB
-can query data/crm.db in place and don't need this.
+Power BI, Excel and Google Sheets all take CSV; Metabase and Tableau can
+query the Postgres database directly and don't need this.
 
 v_contacts includes real emails, in plain text, in a file this script never
 cleans up - exports/ is gitignored so it won't leak via a commit, but
@@ -18,24 +18,18 @@ Usage:
 
 import csv
 import os
-import sqlite3
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
 OUT_DIR = os.path.join(ROOT, "exports")
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
-    conn = sqlite3.connect(DB_PATH)
-
-    available = [
-        row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"
-        )
-    ]
+    conn = db.connect(read_only=True)
+    available = db.view_names(conn)
     targets = sys.argv[1:] or available
 
     unknown = [t for t in targets if t not in available]
@@ -48,10 +42,10 @@ def main():
         path = os.path.join(OUT_DIR, f"{view}.csv")
         with open(path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow([d[0] for d in cursor.description])
+            writer.writerow([d.name for d in cursor.description])
             rows = 0
             for row in cursor:
-                writer.writerow(row)
+                writer.writerow(row.values())
                 rows += 1
         size = os.path.getsize(path) / 1024
         print(f"  {view + '.csv':<28} {rows:>7} rows  {size:>8.1f} KB")

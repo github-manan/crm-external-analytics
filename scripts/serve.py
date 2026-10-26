@@ -26,7 +26,6 @@ import http.server
 import json
 import os
 import re
-import sqlite3
 import sys
 import urllib.parse
 
@@ -39,6 +38,7 @@ import contacts
 import data_quality
 import chatbot
 import adoption
+import db
 import documents
 
 # Who's asking. There's no login, so it's always the same full-access
@@ -86,28 +86,11 @@ def scoped_owner_optional(query):
     return query.get("owner", [None])[0]
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
 STATIC_DIR = os.path.join(ROOT, "dashboard")
 DEFAULT_PORT = 8420
 
-def db():
-    """Read-only connection. Rows come back as dicts."""
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def rows(sql, params=()):
-    with db() as conn:
-        return [dict(r) for r in conn.execute(sql, params)]
-
-
-def view_names():
-    return [
-        r["name"] for r in rows(
-            "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"
-        )
-    ]
+rows = db.rows
+view_names = db.view_names
 
 
 # --- Endpoints --------------------------------------------------------------
@@ -222,13 +205,13 @@ def ep_reps(query):
     return {"fiscal_year": fy or "all", "owner": owner or "All", "rows": rows(
         f"""SELECT owner_name,
                    SUM(is_won) AS deals_won,
-                   ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) AS revenue_inr,
+                   ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END), 2) AS revenue_inr,
                    SUM(is_open) AS deals_open,
-                   ROUND(SUM(CASE WHEN is_open THEN amount_inr END), 2) AS pipeline_inr
+                   ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END), 2) AS pipeline_inr
             FROM v_deals
             WHERE owner_name IS NOT NULL {clause}
             GROUP BY owner_name
-            ORDER BY revenue_inr DESC""", params)}
+            ORDER BY revenue_inr DESC NULLS LAST, owner_name""", params)}
 
 
 def ep_rep_timeseries(query):
@@ -247,7 +230,7 @@ def ep_seasonality(query):
     owner = scoped_owner_optional(query)
     clause, params = ("", ()) if not owner else (" AND owner_name = ?", (owner,))
     return {"note": "Share of all-time won revenue by calendar month.", "rows": rows(
-        f"""SELECT CAST(strftime('%m', closing_date_effective) AS INTEGER) AS month,
+        f"""SELECT CAST(substr(closing_date_effective, 6, 2) AS INTEGER) AS month,
                    COUNT(*) AS deals_won,
                    ROUND(SUM(amount_inr), 2) AS revenue_inr
             FROM v_deals
@@ -263,10 +246,10 @@ def ep_pipelines(query):
                    COUNT(*) AS deals,
                    SUM(is_won) AS won,
                    SUM(is_open) AS open_deals,
-                   ROUND(SUM(CASE WHEN is_won THEN amount_inr END), 2) AS won_inr,
-                   ROUND(SUM(CASE WHEN is_open THEN amount_inr END), 2) AS open_inr
+                   ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END), 2) AS won_inr,
+                   ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END), 2) AS open_inr
             FROM v_deals WHERE pipeline IS NOT NULL{clause}
-            GROUP BY pipeline ORDER BY won_inr DESC""", params)}
+            GROUP BY pipeline ORDER BY won_inr DESC NULLS LAST, pipeline""", params)}
 
 
 # --- Weekly dashboard -------------------------------------------------------
@@ -563,8 +546,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
+    db.database_url()  # exits with a clear message if DATABASE_URL isn't set
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
     os.makedirs(STATIC_DIR, exist_ok=True)
 
@@ -591,7 +573,7 @@ def main():
     print(f"CRM data API on http://{host}:{port}")
     print(f"  endpoints:  http://{host}:{port}/api")
     print(f"  static dir: {STATIC_DIR}/  (put index.html here)")
-    print(f"  database is opened read-only")
+    print(f"  database: Postgres (DATABASE_URL), read-only")
     print("  press Ctrl+C to stop\n")
 
     try:

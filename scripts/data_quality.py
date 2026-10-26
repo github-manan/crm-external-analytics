@@ -15,21 +15,18 @@ Usage: python3 scripts/data_quality.py [YYYY-MM-DD]
 """
 
 import os
-import sqlite3
 import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
 from weekly import rows, one
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
 
 METRICS = {
     "recent_activity": {
         "label": "Open deals with activity logged in the last 30 days",
         "sql": """
-            SELECT SUM(CASE WHEN last_activity_time >= datetime('now', '-30 days') THEN 1 ELSE 0 END) numerator,
+            SELECT SUM(CASE WHEN last_activity_time >= to_char(now() - interval '30 days', 'YYYY-MM-DD"T"HH24:MI') THEN 1 ELSE 0 END) numerator,
                    COUNT(*) denominator
             FROM v_deals WHERE is_open = 1
         """,
@@ -37,10 +34,10 @@ METRICS = {
     "lost_reason_fill": {
         "label": "Closed Lost deals with a real loss reason recorded (Reason_For_Loss__s, not the misused Lost_Reason field)",
         "sql": """
-            SELECT SUM(CASE WHEN json_extract(payload, '$.Reason_For_Loss__s') IS NOT NULL THEN 1 ELSE 0 END) numerator,
+            SELECT SUM(CASE WHEN payload->>'Reason_For_Loss__s' IS NOT NULL THEN 1 ELSE 0 END) numerator,
                    COUNT(*) denominator
             FROM records WHERE module = 'Deals' AND is_deleted = 0
-              AND json_extract(payload, '$.Stage') = 'Closed Lost'
+              AND payload->>'Stage' = 'Closed Lost'
         """,
     },
     "closing_date_fill": {
@@ -62,19 +59,15 @@ METRICS = {
 }
 
 
-def _write_db():
-    return sqlite3.connect(DB_PATH)
-
-
 def snapshot(as_of=None):
     as_of = as_of or date.today().isoformat()
-    conn = _write_db()
-    conn.execute("DELETE FROM data_quality_snapshots WHERE snapshot_date = ?", (as_of,))
+    conn = db.connect()
+    db.execute(conn, "DELETE FROM data_quality_snapshots WHERE snapshot_date = ?", (as_of,))
     for key, spec in METRICS.items():
-        numerator, denominator = conn.execute(spec["sql"]).fetchone()
-        numerator = numerator or 0
+        result = conn.execute(spec["sql"]).fetchone()
+        numerator, denominator = result["numerator"] or 0, result["denominator"]
         pct = round(100 * numerator / denominator, 1) if denominator else None
-        conn.execute(
+        db.execute(conn, 
             """INSERT INTO data_quality_snapshots (snapshot_date, metric_key, numerator, denominator, pct)
                VALUES (?, ?, ?, ?, ?)""",
             (as_of, key, numerator, denominator, pct),
@@ -142,15 +135,13 @@ def history(metric_key, days=90):
     return rows(
         """SELECT snapshot_date, numerator, denominator, pct
            FROM data_quality_snapshots
-           WHERE metric_key = ? AND snapshot_date >= date('now', ?)
+           WHERE metric_key = ? AND snapshot_date >= (current_date - ?::int)::text
            ORDER BY snapshot_date""",
-        (metric_key, f"-{days} days"),
+        (metric_key, days),
     )
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
     as_of = sys.argv[1] if len(sys.argv) > 1 else date.today().isoformat()
     snapshot(as_of)
     result = current()

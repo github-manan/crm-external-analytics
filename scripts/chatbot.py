@@ -11,7 +11,7 @@ the key in .env (GEMINI_API_KEY; GEMINI_MODEL overrides the model). This
 replaced a local Ollama model on 2026-10-22. Gemini is an external
 provider: the question, the chat history and every tool result (CRM
 figures, deal and account names) are sent to Google to produce an answer.
-Read-only either way: nothing here can write to Zoho or to data/crm.db.
+Read-only either way: nothing here can write to Zoho or to the database.
 
 One deliberate exception to "nothing leaves this machine": search_company_background
 sends a company name to DuckDuckGo's public search (no API key, no account,
@@ -203,9 +203,9 @@ def tool_bookings_monthly(args):
 def tool_pipeline_overview(_args):
     rows = call(weekly.rows, """
         SELECT pipeline, COUNT(*) deals, SUM(is_won) won, SUM(is_open) open_deals,
-               ROUND(SUM(CASE WHEN is_won THEN amount_inr END),2) won_inr,
-               ROUND(SUM(CASE WHEN is_open THEN amount_inr END),2) open_inr
-        FROM v_deals WHERE pipeline IS NOT NULL GROUP BY pipeline ORDER BY won_inr DESC
+               ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END),2) won_inr,
+               ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END),2) open_inr
+        FROM v_deals WHERE pipeline IS NOT NULL GROUP BY pipeline ORDER BY won_inr DESC NULLS LAST
     """)
     # Picked here in Python, not left for the model to scan a list and
     # compare - it has gotten "which row is highest" wrong before.
@@ -226,11 +226,11 @@ def tool_rep_performance(args):
     params = (fy,) if fy else ()
     rows = call(weekly.rows, f"""
         SELECT owner_name, SUM(is_won) deals_won,
-               ROUND(SUM(CASE WHEN is_won THEN amount_inr END),2) revenue_inr,
+               ROUND(SUM(CASE WHEN is_won = 1 THEN amount_inr END),2) revenue_inr,
                SUM(is_open) deals_open,
-               ROUND(SUM(CASE WHEN is_open THEN amount_inr END),2) pipeline_inr
+               ROUND(SUM(CASE WHEN is_open = 1 THEN amount_inr END),2) pipeline_inr
         FROM v_deals WHERE owner_name IS NOT NULL {clause}
-        GROUP BY owner_name ORDER BY revenue_inr DESC
+        GROUP BY owner_name ORDER BY revenue_inr DESC NULLS LAST, owner_name
     """, params)
     by_revenue = [r for r in rows if r["revenue_inr"]]
     by_deals_won = sorted(rows, key=lambda r: r["deals_won"] or 0, reverse=True)
@@ -303,7 +303,7 @@ def tool_revenue_comparison(args):
 
     def month_row(key):
         r = weekly.one(f"""
-            SELECT ? closing_month, COALESCE(SUM(deals_won),0) deals_won,
+            SELECT ?::text closing_month, COALESCE(SUM(deals_won),0) deals_won,
                    ROUND(COALESCE(SUM(revenue_inr),0),2) revenue_inr
             FROM v_bookings_monthly WHERE closing_month = ? {clause}
         """, (key, key) + params_extra)

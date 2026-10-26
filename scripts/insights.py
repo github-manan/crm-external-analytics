@@ -83,15 +83,15 @@ def stuck_rate_divergences():
         SELECT d.owner_name,
                COUNT(*) AS open_deals,
                SUM(CASE WHEN last_change IS NULL
-                        OR julianday('now') - julianday(last_change) >= {weekly.STUCK_AFTER_DAYS}
+                        OR current_date - substr(last_change, 1, 10)::date >= {weekly.STUCK_AFTER_DAYS}
                    THEN 1 ELSE 0 END) AS stuck
         FROM (
             SELECT d.id, d.owner_name, MAX(h.changed_at) AS last_change
             FROM v_deals d LEFT JOIN v_deal_history h ON h.deal_id = d.id
             WHERE d.is_open = 1 AND d.owner_name IS NOT NULL
-            GROUP BY d.id
+            GROUP BY d.id, d.owner_name
         ) d
-        GROUP BY owner_name HAVING open_deals >= ?
+        GROUP BY owner_name HAVING COUNT(*) >= ?
     """, (MIN_OPEN_DEALS,))
     if not rows_:
         return []
@@ -134,7 +134,7 @@ def _top_values(column, limit):
     return [r["v"] for r in rows(
         f"""SELECT {column} AS v, COUNT(*) AS n FROM v_leads
             WHERE {column} IS NOT NULL GROUP BY {column}
-            HAVING n >= ? ORDER BY n DESC LIMIT ?""",
+            HAVING COUNT(*) >= ? ORDER BY n DESC, v LIMIT ?""",
         (segments.MIN_SAMPLE, limit),
     )]
 

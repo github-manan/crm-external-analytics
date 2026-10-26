@@ -1,6 +1,6 @@
 # MitKat GrowthIQ — Zoho CRM → local data layer
 
-Pulls Zoho CRM into a local SQLite database with typed SQL views on top, so
+Pulls Zoho CRM into a Postgres database with typed SQL views on top, so
 dashboards and models can be built without touching the Zoho API or its
 quirks. Extraction only — no dashboards live here.
 
@@ -10,7 +10,14 @@ quirks. Extraction only — no dashboards live here.
 
 ## Quick start
 
+Needs Python 3.9+ and a Postgres database. Settings come from environment
+variables (or a `.env` file locally) - see `.env.example` for the full list.
+Nothing is hardcoded: the database is `DATABASE_URL`, e.g.
+`postgresql://localhost/crm` locally, or the RDS URL in production.
+
 ```bash
+pip install -r requirements.txt
+python3 scripts/migrate.py      # create tables, seed targets, build views (safe to re-run)
 python3 scripts/extract.py      # pull records from Zoho (delta after first run)
 python3 scripts/transform.py    # (re)build the SQL views
 python3 scripts/snapshot.py     # freeze today's open pipeline
@@ -22,11 +29,23 @@ Or all three in order:
 ./scripts/daily.sh              # logs to logs/daily.log
 ```
 
-Database lands at `data/crm.db`. Stdlib Python 3 only for everything above —
-nothing to install. The AI assistant (`scripts/chatbot.py`, reached through
-`serve.py`) needs a `GEMINI_API_KEY` line in `.env`, plus three extra packages - `pip install -r requirements.txt` -
-for web search and document upload; dashboards and the sync itself still
-need nothing beyond stdlib.
+The AI assistant (`scripts/chatbot.py`, reached through `serve.py`) also
+needs `GEMINI_API_KEY`.
+
+Moving an existing SQLite `data/crm.db` (the pre-Postgres setup) across is a
+one-off: `python3 scripts/sqlite_to_postgres.py data/crm.db`. It carries over
+the snapshot history, which Zoho can't give back.
+
+Revenue targets live in the `revenue_targets` table (seeded once from
+`config/targets.json`, then edited in the database):
+
+```sql
+-- company target for a month, or a rep's monthly target
+INSERT INTO revenue_targets (scope, key, target_inr) VALUES ('company', '2026-11', 40000000)
+    ON CONFLICT (scope, key) DO UPDATE SET target_inr = EXCLUDED.target_inr;
+INSERT INTO revenue_targets (scope, key, target_inr) VALUES ('owner', 'Mrunal Patil', 3000000)
+    ON CONFLICT (scope, key) DO UPDATE SET target_inr = EXCLUDED.target_inr;
+```
 
 Then serve it to the dashboard:
 
@@ -323,7 +342,7 @@ distribution, account and industry mix.
 
 ## Scheduling
 
-`data/crm.db` is only as fresh as the last run, so the refresh has to be
+The database is only as fresh as the last run, so the refresh has to be
 scheduled rather than remembered.
 
 **Windows** — `scripts/daily.ps1`, registered with Task Scheduler. Run once in
@@ -397,15 +416,18 @@ metric definition costs a view rebuild rather than a re-extraction.
 scripts/authorize.py   one-time OAuth setup, writes .env
 scripts/zoho.py        API client: token refresh, retries, pagination
 scripts/extract.py     Zoho -> records table
+scripts/db.py          Postgres connection (DATABASE_URL) + table schema
+scripts/migrate.py     deploy step: tables + targets seed + views
 scripts/transform.py   records -> v_* views
+scripts/sqlite_to_postgres.py  one-off copy of an old SQLite crm.db
 scripts/snapshot.py    daily open-pipeline freeze
 scripts/serve.py       read-only JSON API + static host for dashboard/
 scripts/export.py      views -> exports/*.csv
 scripts/export_json.py views -> dashboard/data/*.json
 scripts/daily.sh       runs extract + transform + snapshot
 dashboard/             the hand-built dashboard lives here
-data/crm.db            the database (gitignored)
-.env                   credentials, mode 600 (gitignored, never commit)
+.env                   local settings + credentials (gitignored, never commit)
+.env.example           every setting the app reads, without values
 ```
 
 ---

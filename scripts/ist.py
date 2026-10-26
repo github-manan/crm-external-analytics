@@ -27,7 +27,7 @@ Zoho's internal logic.
 """
 
 import weekly
-from weekly import db, rows, one, week_bounds, owner_clause, movement, movement_summary  # noqa: F401
+from weekly import rows, one, week_bounds, owner_clause, movement, movement_summary  # noqa: F401
 from weekly import as_of_date, DEALS_AS_OF
 
 
@@ -52,13 +52,13 @@ def lead_status(owner=None, week=None):
     status - Zoho keeps no history of lead status changes."""
     w, p = owner_clause(owner)
     as_of = as_of_date(week)
-    created = " AND date(created_time) <= ?" if as_of else ""
+    created = " AND substr(created_time, 1, 10) <= ?" if as_of else ""
     return rows(f"""
         SELECT COALESCE(lead_status, 'None') status, COUNT(*) n
         FROM v_leads
         WHERE 1=1{created}{w}
         GROUP BY status
-        ORDER BY n DESC
+        ORDER BY n DESC, status
     """, ([as_of] if as_of else []) + p)
 
 
@@ -76,7 +76,7 @@ def performance_weeks(n=3, owner=None, week=None):
         w, p = owner_clause(owner)
 
         leads = one(f"""SELECT COUNT(*) n FROM v_leads
-                        WHERE date(created_time) BETWEEN ? AND ?{w}""",
+                        WHERE substr(created_time, 1, 10) BETWEEN ? AND ?{w}""",
                     [start, end] + p).get("n", 0)
 
         won = one(f"""SELECT COUNT(*) n, COALESCE(SUM(amount_inr), 0) v FROM v_deals

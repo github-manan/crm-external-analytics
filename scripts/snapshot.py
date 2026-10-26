@@ -12,35 +12,29 @@ Usage: python3 scripts/snapshot.py [YYYY-MM-DD]
 """
 
 import os
-import sqlite3
 import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data_quality
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(ROOT, "data", "crm.db")
+import db
 
 
 def main():
     as_of = sys.argv[1] if len(sys.argv) > 1 else date.today().isoformat()
 
-    if not os.path.exists(DB_PATH):
-        sys.exit(f"{DB_PATH} not found - run scripts/extract.py first.")
-    conn = sqlite3.connect(DB_PATH)
+    conn = db.connect()
 
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='view' AND name='v_deals'"
-    ).fetchone():
+    if "v_deals" not in db.view_names(conn):
         sys.exit("v_deals missing - run scripts/transform.py first.")
 
-    conn.execute("DELETE FROM pipeline_snapshots WHERE snapshot_date = ?", (as_of,))
-    conn.execute(
+    db.execute(conn, "DELETE FROM pipeline_snapshots WHERE snapshot_date = ?", (as_of,))
+    db.execute(
+        conn,
         """INSERT INTO pipeline_snapshots
                (snapshot_date, deal_id, deal_name, stage, pipeline,
                 amount_inr, probability, closing_date, owner_name)
-           SELECT ?, id, deal_name, stage, pipeline,
+           SELECT ?::text, id, deal_name, stage, pipeline,
                   amount_inr, probability, closing_date, owner_name
            FROM v_deals
            WHERE is_open = 1""",
@@ -48,14 +42,16 @@ def main():
     )
     conn.commit()
 
-    rows, value = conn.execute(
-        """SELECT COUNT(*), COALESCE(SUM(amount_inr), 0)
+    totals = db.execute(
+        conn,
+        """SELECT COUNT(*) AS n, COALESCE(SUM(amount_inr), 0) AS v
            FROM pipeline_snapshots WHERE snapshot_date = ?""",
         (as_of,),
     ).fetchone()
+    rows, value = totals["n"], totals["v"]
     days = conn.execute(
-        "SELECT COUNT(DISTINCT snapshot_date) FROM pipeline_snapshots"
-    ).fetchone()[0]
+        "SELECT COUNT(DISTINCT snapshot_date) AS n FROM pipeline_snapshots"
+    ).fetchone()["n"]
 
     print(f"Snapshot {as_of}: {rows} open deals, {value/10_000_000:.2f} cr")
     print(f"History depth: {days} day(s) captured")

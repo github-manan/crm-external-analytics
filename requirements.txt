@@ -1,7 +1,8 @@
-# Only needed for the AI assistant's optional features - the Zoho sync,
-# transform, and dashboards themselves are stdlib Python 3 only (see README).
-# search_company_background:
+# Postgres driver + connection pool (every script and the API server):
+psycopg[binary]>=3.2
+psycopg-pool>=3.2
+# Assistant - search_company_background:
 ddgs>=9.0
-# Document upload (.pdf/.xlsx attachments):
+# Assistant - document upload (.pdf/.xlsx attachments):
 pypdf>=6.0
 openpyxl>=3.1

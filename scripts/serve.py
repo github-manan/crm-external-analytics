@@ -23,6 +23,7 @@ Usage:
 """
 
 import base64
+import errno
 import http.server
 import json
 import os
@@ -693,13 +694,32 @@ def main():
     # also need a Windows Firewall rule for this port).
     host = os.environ.get("CRM_BIND_HOST", "localhost")
 
+    try:
+        server = http.server.ThreadingHTTPServer((host, port), Handler)
+    except OSError as error:
+        # errno 48 on macOS, 98 on Linux, winerror 10048 on Windows -
+        # almost always a server left running
+        if error.errno == errno.EADDRINUSE or getattr(error, "winerror", None) == 10048:
+            sys.exit(
+                f"Port {port} is already in use - a server is probably still running.\n"
+                f"Either use it (http://{host}:{port}) or stop it first:\n"
+                f"    pkill -f scripts/serve.py\n"
+                f"Or start this one on a different port:\n"
+                f"    python3 scripts/serve.py {port + 1}"
+            )
+        raise
+
     print(f"CRM data API on http://{host}:{port}")
     print(f"  endpoints:  http://{host}:{port}/api")
     print(f"  static dir: {STATIC_DIR}/  (put index.html here)")
     print(f"  database is opened read-only")
-    print(f"  logins: {auth.USERS_PATH} ({len(auth.load_users())} user(s))\n")
+    print(f"  logins: {auth.USERS_PATH} ({len(auth.load_users())} user(s))")
+    print("  press Ctrl+C to stop\n")
 
-    http.server.ThreadingHTTPServer((host, port), Handler).serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nserver stopped")
 
 
 if __name__ == "__main__":

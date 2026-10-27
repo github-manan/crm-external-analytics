@@ -37,24 +37,10 @@ import contacts
 import data_quality
 import adoption
 import insights
+import app_secrets
 from ddgs import DDGS
 
-ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-
-
-def _load_env():
-    """KEY=VALUE lines from .env into the environment (same format as zoho.py's)."""
-    if not os.path.exists(ENV_PATH):
-        return
-    for line in open(ENV_PATH):
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-_load_env()
+app_secrets.load()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"

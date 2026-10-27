@@ -1,7 +1,8 @@
 """Shared Zoho CRM API client: token handling and paged reads.
 
 Stdlib only. Access tokens live 1 hour and are minted on demand from the
-refresh token in .env, so nothing needs to persist them.
+refresh token (ZOHO_REFRESH_TOKEN, loaded by app_secrets), so nothing
+needs to persist them.
 """
 
 import http.client
@@ -12,6 +13,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import app_secrets
 
 TIMEOUT = 60
 MAX_ATTEMPTS = 5
@@ -24,10 +27,6 @@ TRANSIENT = (
     urllib.error.URLError,
     socket.timeout,
     ConnectionError,
-)
-
-ENV_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
 )
 
 _token = {"value": None, "expires_at": 0}
@@ -43,22 +42,6 @@ class ZohoError(RuntimeError):
         super().__init__(f"HTTP {status} on {path}\n{body}")
 
 
-def load_env():
-    """.env is for local runs; on a server the same names come from the
-    real environment, which always wins (setdefault)."""
-    if not os.path.exists(ENV_PATH):
-        if not os.environ.get("ZOHO_REFRESH_TOKEN"):
-            raise SystemExit(f"No Zoho credentials - set the ZOHO_* variables (see .env.example), "
-                             f"or run scripts/authorize.py to create {ENV_PATH}.")
-        return
-    for line in open(ENV_PATH):
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
-
-
 def _post_form(url, fields):
     request = urllib.request.Request(url, data=urllib.parse.urlencode(fields).encode())
     with urllib.request.urlopen(request) as response:
@@ -70,7 +53,7 @@ def access_token():
     if _token["value"] and time.time() < _token["expires_at"] - 60:
         return _token["value"]
 
-    load_env()
+    app_secrets.load()
     payload = _post_form(
         f"https://{os.environ['ZOHO_ACCOUNTS_HOST']}/oauth/v2/token",
         {
@@ -94,7 +77,7 @@ def api_get(path, params=None, headers=None):
     Returns None for 204 (empty result) and 304 (nothing modified since the
     If-Modified-Since header), both of which are normal outcomes here.
     """
-    load_env()
+    app_secrets.load()
     url = f"https://{os.environ['ZOHO_API_DOMAIN']}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)

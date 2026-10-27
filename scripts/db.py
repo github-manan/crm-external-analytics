@@ -1,7 +1,7 @@
 """The one Postgres connection point for every script and the API server.
 
-The database comes from the DATABASE_URL environment variable (or a
-DATABASE_URL line in .env for local runs), e.g.
+The database comes from DATABASE_URL, loaded by app_secrets (AWS Secrets
+Manager on the server, .env on a laptop), e.g.
     postgres://crm_user:<password>@<host>:5432/crm?sslmode=require
 Nothing about the database - host, user, password - is ever written in code.
 
@@ -27,31 +27,19 @@ import psycopg
 from psycopg.adapt import Loader
 from psycopg.rows import dict_row
 
+import app_secrets
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENV_PATH = os.path.join(ROOT, ".env")
 TIMEZONE = "Asia/Kolkata"
 
 
-def load_env():
-    """KEY=VALUE lines from .env into the environment, never overriding a
-    variable that's already set (a real environment always wins)."""
-    if not os.path.exists(ENV_PATH):
-        return
-    for line in open(ENV_PATH, encoding="utf-8"):
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-load_env()
+app_secrets.load()
 
 
 def database_url():
     url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
-        raise SystemExit("DATABASE_URL isn't set - add it to the environment (or .env for local runs), "
+        raise SystemExit("DATABASE_URL isn't set - add it to the secret (server) or .env (laptop), "
                          "e.g. DATABASE_URL=postgresql://localhost/crm")
     return url
 

@@ -1,8 +1,11 @@
+# Exact versions (==) so the security scan can check them.
 # Postgres driver + connection pool (every script and the API server):
-psycopg[binary]>=3.2
-psycopg-pool>=3.2
+psycopg[binary]==3.2.13
+psycopg-pool==3.2.8
+# Settings from AWS Secrets Manager on the server (scripts/app_secrets.py):
+boto3==1.42.97
 # Assistant - search_company_background:
-ddgs>=9.0
+ddgs==9.8.0
 # Assistant - document upload (.pdf/.xlsx attachments):
-pypdf>=6.0
-openpyxl>=3.1
+pypdf==6.21.2
+openpyxl==3.1.5

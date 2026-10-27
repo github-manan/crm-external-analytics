@@ -18,6 +18,8 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import app_secrets
+app_secrets.load()  # settings first: Secrets Manager on the server, .env on a laptop
 import weekly
 import segments
 import contacts

@@ -19,6 +19,8 @@ import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import app_secrets
+app_secrets.load()  # settings first: Secrets Manager on the server, .env on a laptop
 import db
 from weekly import rows, one
 

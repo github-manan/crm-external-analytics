@@ -10,8 +10,10 @@ quirks. Extraction only — no dashboards live here.
 
 ## Quick start
 
-Needs Python 3.9+ and a Postgres database. Settings come from environment
-variables (or a `.env` file locally) - see `.env.example` for the full list.
+Needs Python 3.9+ and a Postgres database. Settings are loaded by
+`scripts/app_secrets.py`: on the server, where systemd sets `CRM_SECRET_ID`,
+from that AWS Secrets Manager secret (a JSON object of the same keys); on a
+laptop, from a local `.env` file - see `.env.example` for the full list.
 Nothing is hardcoded: the database is `DATABASE_URL`, e.g.
 `postgresql://localhost/crm` locally, or the RDS URL in production.
 
@@ -414,6 +416,7 @@ metric definition costs a view rebuild rather than a re-extraction.
 
 ```
 scripts/authorize.py   one-time OAuth setup, writes .env
+scripts/app_secrets.py settings loader: Secrets Manager (server) or .env (laptop)
 scripts/zoho.py        API client: token refresh, retries, pagination
 scripts/extract.py     Zoho -> records table
 scripts/db.py          Postgres connection (DATABASE_URL) + table schema
@@ -452,7 +455,8 @@ Writing to the CRM is therefore impossible through this credential, not
 merely discouraged. Zoho rejects the call at the API boundary.
 
 `.env` holds a **non-expiring refresh token**. Treat it like a password. It is
-gitignored and mode 600; don't move it into a shared drive or commit it.
+gitignored and mode 600; don't move it into a shared drive or commit it. On
+the server there is no `.env`: the same keys live in AWS Secrets Manager.
 
 To re-authorize from scratch (new machine, or rotated secret):
 
